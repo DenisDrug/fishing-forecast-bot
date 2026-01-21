@@ -42,8 +42,8 @@ class Config:
             missing.append('TELEGRAM_BOT_TOKEN')
         if not cls.OPENWEATHER_API_KEY:
             missing.append('OPENWEATHER_API_KEY')
-        if not cls.DEEPSEEK_API_KEY:
-            missing.append('DEEPSEEK_API_KEY')
+        if not cls.GEMINI_API_KEY:
+            missing.append('GEMINI_API_KEY')
         if not cls.DB_NAME:
             missing.append('DB_NAME')
 

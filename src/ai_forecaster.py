@@ -172,3 +172,5 @@ class AIForecaster:
         # Ваш существующий резервный алгоритм
         print(f"⚠️ Используем резервный алгоритм для {region}")
         # ... ваш существующий код ...
+
+ai_forecaster = AIForecaster()
