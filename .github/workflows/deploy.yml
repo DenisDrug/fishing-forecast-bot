@@ -34,5 +34,5 @@ jobs:
           # Устанавливаем зависимости и перезапускаем
           source venv/bin/activate
           pip install -r requirements.txt
-          sudo supervisorctl restart telegram-bot
+          sudo supervisorctl restart fishing-forecast-bot
           echo "✅ Deployment completed!"
