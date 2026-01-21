@@ -27,40 +27,46 @@ jobs:
           echo "📥 Pulling latest changes..."
           git pull origin main
           
-          # СОЗДАЕМ VENV ЕСЛИ НЕТ
-          if [ ! -d "venv" ]; then
-            echo "🐍 Creating virtual environment..."
-            python3 -m venv venv
-          fi
-          
-          # АКТИВИРУЕМ
+          # Активируем окружение
           source venv/bin/activate
           
-          # УСТАНАВЛИВАЕМ ЗАВИСИМОСТИ
-          echo "📦 Installing dependencies..."
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          
-          # ПРОВЕРЯЕМ .env
-          if [ ! -f ".env" ]; then
-            echo "⚠️  WARNING: .env file missing!"
-            echo "Copy .env.example to .env and fill it"
-          fi
-          
-          echo "🛑 Stopping current bot..."
-          pkill -f "python bot.py" 2>/dev/null || true
-          sleep 3
-          
-          echo "▶️ Starting bot..."
-          nohup python bot.py > bot.log 2>&1 &
-          
+          # Останавливаем бота НАДЕЖНО
+          echo "🛑 Останавливаем бота (надежно)..."
+          # Ищем все возможные процессы
+          pkill -9 -f "python.*bot.py" 2>/dev/null || true
+          # Альтернативный поиск
+          ps aux | grep -E "python.*bot" | grep -v grep | awk '{print $2}' | xargs kill -9 2>/dev/null || true
+          # Даем время на завершение
           sleep 5
           
-          if pgrep -f "python bot.py" > /dev/null; then
-            echo "✅ Bot deployed successfully!"
-            echo "📝 Logs: /root/fishing-forecast-bot/bot.log"
+          echo "🔍 Проверяем, что процессы завершились..."
+          if pgrep -f "python.*bot.py" > /dev/null; then
+            echo "⚠️  Предупреждение: некоторые процессы еще живы. Принудительная остановка..."
+            pkill -9 -f "python"
+            sleep 3
+          fi
+          
+          # Запускаем бота
+          echo "▶️ Запускаем бота..."
+          # Убедимся, что можем писать в log файл
+          touch bot.log
+          chmod 644 bot.log
+          
+          nohup python bot.py > bot.log 2>&1 &
+          
+          echo "⏳ Ждем 8 секунд для стабильного запуска..."
+          sleep 8
+          
+          if pgrep -f "python.*bot.py" > /dev/null; then
+            echo "✅ Бот успешно запущен!"
+            echo "📋 Информация о процессе:"
+            ps aux | grep "python.*bot.py" | grep -v grep
+            echo ""
+            echo "📝 Логи (последние 5 строк):"
+            tail -5 /root/fishing-forecast-bot/bot.log
           else
-            echo "❌ Bot failed to start!"
-            tail -50 /root/fishing-forecast-bot/bot.log
+            echo "❌ Ошибка: бот не запустился!"
+            echo "📄 Последние 20 строк лога для диагностики:"
+            tail -20 /root/fishing-forecast-bot/bot.log
             exit 1
           fi
