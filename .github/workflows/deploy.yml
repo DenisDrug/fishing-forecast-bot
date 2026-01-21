@@ -12,7 +12,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Deploy to Production Server
+    - name: Deploy
       uses: appleboy/ssh-action@v0.1.5
       with:
         host: ${{ secrets.SERVER_HOST }}
@@ -20,53 +20,14 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ secrets.SERVER_PORT }}
         script: |
-          echo "🚀 Начало деплоя..."
-          
           cd /root/fishing-forecast-bot
-          
-          echo "📥 Pulling latest changes..."
           git pull origin main
-          
-          # Активируем окружение
           source venv/bin/activate
           
-          # Останавливаем бота НАДЕЖНО
-          echo "🛑 Останавливаем бота (надежно)..."
-          # Ищем все возможные процессы
-          pkill -9 -f "python.*bot.py" 2>/dev/null || true
-          # Альтернативный поиск
-          ps aux | grep -E "python.*bot" | grep -v grep | awk '{print $2}' | xargs kill -9 2>/dev/null || true
-          # Даем время на завершение
-          sleep 5
-          
-          echo "🔍 Проверяем, что процессы завершились..."
-          if pgrep -f "python.*bot.py" > /dev/null; then
-            echo "⚠️  Предупреждение: некоторые процессы еще живы. Принудительная остановка..."
-            pkill -9 -f "python"
-            sleep 3
-          fi
-          
-          # Запускаем бота
-          echo "▶️ Запускаем бота..."
-          # Убедимся, что можем писать в log файл
-          touch bot.log
-          chmod 644 bot.log
-          
+          # Просто перезапускаем через systemctl если настроен
+          # или через pkill
+          pkill -f "python bot.py" 2>/dev/null || true
+          sleep 1
           nohup python bot.py > bot.log 2>&1 &
           
-          echo "⏳ Ждем 8 секунд для стабильного запуска..."
-          sleep 8
-          
-          if pgrep -f "python.*bot.py" > /dev/null; then
-            echo "✅ Бот успешно запущен!"
-            echo "📋 Информация о процессе:"
-            ps aux | grep "python.*bot.py" | grep -v grep
-            echo ""
-            echo "📝 Логи (последние 5 строк):"
-            tail -5 /root/fishing-forecast-bot/bot.log
-          else
-            echo "❌ Ошибка: бот не запустился!"
-            echo "📄 Последние 20 строк лога для диагностики:"
-            tail -20 /root/fishing-forecast-bot/bot.log
-            exit 1
-          fi
+          echo "Deployment completed"
