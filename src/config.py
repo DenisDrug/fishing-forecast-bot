@@ -10,7 +10,7 @@ class Config:
     # Ключи API
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
-    DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY')
+    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
     # Настройки PostgreSQL
     DB_HOST = os.getenv('DB_HOST', 'localhost')
@@ -23,7 +23,7 @@ class Config:
     DB_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
     # Настройки API
-    DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+    GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
     OPENWEATHER_API_URL = "https://api.openweathermap.org/data/2.5/forecast"
 
     # Настройки приложения
