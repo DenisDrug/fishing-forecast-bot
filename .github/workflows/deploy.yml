@@ -12,22 +12,27 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Deploy
-      uses: appleboy/ssh-action@v0.1.5
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v0.1.7
       with:
         host: ${{ secrets.SERVER_HOST }}
-        username: ${{ secrets.SERVER_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ secrets.SERVER_PORT }}
+        username: ${{ secrets.SERVER_USERNAME }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        port: 22
         script: |
-          cd /root/fishing-forecast-bot
-          git pull origin main
+          echo "🚀 Starting deployment..."
+          cd /root/telegram-bot
+          
+          # Очищаем кэш Python чтобы git pull работал
+          find . -name "*.pyc" -delete
+          find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          
+          # Принудительно обновляем код
+          git fetch --all
+          git reset --hard origin/main
+          
+          # Устанавливаем зависимости и перезапускаем
           source venv/bin/activate
-          
-          # Просто перезапускаем через systemctl если настроен
-          # или через pkill
-          pkill -f "python bot.py" 2>/dev/null || true
-          sleep 1
-          nohup python bot.py > bot.log 2>&1 &
-          
-          echo "Deployment completed"
+          pip install -r requirements.txt
+          sudo supervisorctl restart telegram-bot
+          echo "✅ Deployment completed!"
