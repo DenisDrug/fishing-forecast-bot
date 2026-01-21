@@ -21,7 +21,7 @@ jobs:
         port: 22
         script: |
           echo "🚀 Starting deployment..."
-          cd /root/telegram-bot
+          cd /root/fishing-forecast-bot
           
           # Очищаем кэш Python чтобы git pull работал
           find . -name "*.pyc" -delete
