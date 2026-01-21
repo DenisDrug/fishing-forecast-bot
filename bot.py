@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 🎣 Telegram Bot: Прогноз клева рыбы
-Автор: Denis Breivo
+Автор: Denis Bre
 Версия: 1.0.0
 """
 
