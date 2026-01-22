@@ -20,19 +20,29 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: 22
         script: |
-          echo "🚀 Starting deployment..."
           cd /root/fishing-forecast-bot
-          
-          # Очищаем кэш Python чтобы git pull работал
-          find . -name "*.pyc" -delete
-          find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-          
-          # Принудительно обновляем код
-          git fetch --all
-          git reset --hard origin/main
-          
-          # Устанавливаем зависимости и перезапускаем
+          git pull origin main
           source venv/bin/activate
           pip install -r requirements.txt
-          sudo supervisorctl restart fishing-forecast-bot
-          echo "✅ Deployment completed!"
+
+          # Используем systemd для перезапуска
+          sudo systemctl restart fishing-forecast
+          echo "✅ Бот перезапущен через systemd"
+
+#        script: |
+#          echo "🚀 Starting deployment..."
+#          cd /root/fishing-forecast-bot
+#
+#          # Очищаем кэш Python чтобы git pull работал
+#          find . -name "*.pyc" -delete
+#          find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+#
+#          # Принудительно обновляем код
+#          git fetch --all
+#          git reset --hard origin/main
+#
+#          # Устанавливаем зависимости и перезапускаем
+#          source venv/bin/activate
+#          pip install -r requirements.txt
+#          sudo supervisorctl restart fishing-forecast-bot
+#          echo "✅ Deployment completed!"
