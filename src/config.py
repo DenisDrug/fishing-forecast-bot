@@ -10,7 +10,7 @@ class Config:
     # Ключи API
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     OPENWEATHER_API_KEY = os.getenv('OPENWEATHER_API_KEY')
-    GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
+    GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 
     # Настройки PostgreSQL
     DB_HOST = os.getenv('DB_HOST', 'localhost')
@@ -23,7 +23,7 @@ class Config:
     DB_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
     # Настройки API
-    GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent"
+    GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
     OPENWEATHER_API_URL = "https://api.openweathermap.org/data/2.5/forecast"
 
     # Настройки приложения
@@ -42,8 +42,8 @@ class Config:
             missing.append('TELEGRAM_BOT_TOKEN')
         if not cls.OPENWEATHER_API_KEY:
             missing.append('OPENWEATHER_API_KEY')
-        if not cls.GEMINI_API_KEY:
-            missing.append('GEMINI_API_KEY')
+        if not cls.GROQ_API_KEY:
+            missing.append('GROQ_API_KEY')
         if not cls.DB_NAME:
             missing.append('DB_NAME')
 
