@@ -53,7 +53,7 @@ class AIForecaster:
     def __init__(self):
         self.api_key = config.GROQ_API_KEY
         self.api_url = config.GROQ_API_URL
-        self.model = "mixtral-8x7b-32768"  # Бесплатная модель Groq
+        self.model = "llama-3.1-8b-instant"  # Бесплатная модель Groq
 
     def _create_user_prompt(self, region: str, weather_data: List[Dict[str, Any]]) -> str:
         """Создание промпта для ИИ на основе погодных данных"""
