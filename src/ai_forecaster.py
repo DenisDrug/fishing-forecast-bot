@@ -138,7 +138,7 @@ class AIForecaster:
                 self.api_url,
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=80
             )
 
             if response.status_code != 200:
