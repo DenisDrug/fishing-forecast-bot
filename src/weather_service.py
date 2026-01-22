@@ -63,11 +63,15 @@ class WeatherService:
                 rain = day_forecast.get('rain', {}).get('3h', 0)
                 snow = day_forecast.get('snow', {}).get('3h', 0)
 
+                # Конвертируем давление из гПа в мм рт.ст.
+                pressure_hpa = main.get('pressure', 1013)
+                pressure_mmhg = round(pressure_hpa * 0.750062, 1)
+
                 forecast_data = {
                     'date': datetime.fromtimestamp(day_forecast['dt']).isoformat(),
                     'temperature': main.get('temp', 0),
                     'feels_like': main.get('feels_like', 0),
-                    'pressure': main.get('pressure', 1013),
+                    'pressure': pressure_mmhg,  # мм рт.ст.
                     'humidity': main.get('humidity', 0),
                     'wind_speed': wind.get('speed', 0),
                     'wind_direction': wind.get('deg', 0),
@@ -130,7 +134,7 @@ class WeatherService:
                 f"• {day['description']}\n"
                 f"• Температура: {day['temperature']:.1f}°C\n"
                 f"• Ощущается как: {day['feels_like']:.1f}°C\n"
-                f"• Давление: {day['pressure']} гПа\n"
+                f"• Давление: {day['pressure']:.1f} мм рт.ст.\n"  # Изменено
                 f"• Влажность: {day['humidity']}%\n"
                 f"• Ветер: {day['wind_speed']:.1f} м/с ({wind_dir})\n"
                 f"• Облачность: {day['cloudiness']}%\n"
