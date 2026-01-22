@@ -3,8 +3,9 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     ContextTypes, filters, CallbackQueryHandler
 )
-from datetime import datetime
+from datetime import datetime, timedelta
 import traceback
+import requests
 
 from .config import config
 from .database import db
@@ -13,14 +14,20 @@ from .ai_forecaster import ai_forecaster
 
 
 class FishingForecastBot:
-    """Основной класс Telegram-бота"""
+    """Основной класс Telegram-бота с поддержкой диалога"""
 
     def __init__(self):
         self.application = None
+        self.user_context = {}  # Храним контекст пользователей: {user_id: {last_region, last_forecast, last_request_date}}
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
         user = update.effective_user
+        user_id = user.id
+
+        # Очищаем старый контекст при новом старте
+        if user_id in self.user_context:
+            del self.user_context[user_id]
 
         # Сохраняем пользователя в БД
         user_data = {
@@ -30,45 +37,44 @@ class FishingForecastBot:
             'last_name': user.last_name
         }
 
-        user_id = db.save_user(user_data)
-
-        # Получаем статистику пользователя
-        stats = db.get_user_stats(user_id)
+        user_db_id = db.save_user(user_data)
+        stats = db.get_user_stats(user_db_id)
 
         # Формируем приветственное сообщение
         if stats and stats['total_requests'] > 0:
-            # Для существующих пользователей
             welcome_msg = (
                 f"🎣 Добро пожаловать обратно, {user.first_name}!\n\n"
                 f"📊 Ваша статистика:\n"
                 f"• Первый запуск: {stats['first_launch'].strftime('%d.%m.%Y')}\n"
                 f"• Всего запросов: {stats['total_requests']}\n"
                 f"• Последний запрос: {stats['last_request'].strftime('%d.%m.%Y %H:%M') if stats['last_request'] else 'Нет'}\n\n"
-                f"Чтобы получить прогноз клева, просто напишите название региона или города.\n"
-                f"Например: *Москва*, *Санкт-Петербург*, *Байкал*"
+                f"*Новый функционал:* Теперь можно задавать уточняющие вопросы!\n"
+                f"1. Запросите прогноз для региона\n"
+                f"2. Затем спросите про конкретный водоем, насадки или виды рыб\n\n"
+                f"Например: *Москва*, затем *Река Москва*, затем *Какие насадки?*"
             )
         else:
-            # Для новых пользователей
             welcome_msg = (
                 f"🎣 Привет, {user.first_name}!\n\n"
-                f"Я — *{config.BOT_NAME}*, бот для прогноза клева рыбы!\n\n"
+                f"Я — *{config.BOT_NAME}*, твой умный помощник для рыбалки!\n\n"
                 f"📈 **Что я умею:**\n"
                 f"• Анализировать погоду на {config.FORECAST_DAYS} дней\n"
                 f"• Прогнозировать клев рыбы с помощью ИИ\n"
-                f"• Сохранять историю ваших запросов\n\n"
-                f"📝 **Как пользоваться:**\n"
-                f"Просто напишите название города или региона.\n"
-                f"Например: *Москва* или *Санкт-Петербург*\n\n"
-                f"🔍 **Доступные команды:**\n"
-                f"/start - Запустить бота\n"
-                f"/help - Помощь\n"
-                f"/history - История запросов\n\n"
+                f"• Поддерживать диалог - задавайте уточняющие вопросы!\n\n"
+                f"🎯 **Новый функционал:**\n"
+                f"1. Запросите прогноз для региона (например: *Москва*)\n"
+                f"2. Затем можете уточнить:\n"
+                f"   • Конкретный водоем (река, озеро)\n"
+                f"   • Виды рыб\n"
+                f"   • Насадки и снасти\n"
+                f"   • Места ловли\n\n"
                 f"*Напишите название города, чтобы начать!*"
             )
 
         keyboard = [
             [InlineKeyboardButton("📋 История запросов", callback_data="history")],
-            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")]
+            [InlineKeyboardButton("ℹ️ Помощь", callback_data="help")],
+            [InlineKeyboardButton("🎣 Пример диалога", callback_data="example_dialog")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
 
@@ -81,24 +87,30 @@ class FishingForecastBot:
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /help"""
         help_text = (
-            f"🎣 *{config.BOT_NAME}*\n\n"
-            f"📖 **Руководство пользователя:**\n\n"
-            f"🔍 **Основные команды:**\n"
-            f"• Напишите название города - получить прогноз\n"
-            f"• /history - История запросов\n"
-            f"• /help - Эта справка\n"
-            f"• /start - Перезапустить бота\n\n"
-            f"📊 **Как работает прогноз:**\n"
-            f"1. Я получаю погоду с OpenWeatherMap\n"
-            f"2. Анализирую данные с помощью ИИ GROQ\n"
-            f"3. Учитываю давление, температуру, ветер\n"
-            f"4. Даю оценку клева по 5-балльной шкале\n\n"
-            f"🎯 **Факторы влияния:**\n"
-            f"• *Давление*: Стабильное = хорошо\n"
-            f"• *Температура*: 15-25°C = оптимально\n"
-            f"• *Ветер*: 1-4 м/с = хорошо\n"
-            f"• *Осадки*: Легкий дождь = часто улучшает\n\n"
-            f"*Удачной рыбалки!* 🎣"
+            f"🎣 *{config.BOT_NAME} - Умный рыболовный помощник*\n\n"
+            f"📖 **Как работает диалог:**\n\n"
+            f"1️⃣ **ШАГ 1: Запрос прогноза**\n"
+            f"Напишите название региона или города\n"
+            f"*Пример:* Москва, Санкт-Петербург, Лида\n\n"
+            f"2️⃣ **ШАГ 2: Уточняющие вопросы**\n"
+            f"После получения прогноза можете спросить:\n"
+            f"• *Конкретный водоем:* Река Неман, Озеро Белое\n"
+            f"• *Виды рыб:* Где ловить щуку? Как поймать окуня?\n"
+            f"• *Насадки и снасти:* Какие насадки? Какие снасти использовать?\n"
+            f"• *Места ловли:* Где лучше ловить? Какие места?\n\n"
+            f"🔍 **Пример диалога:**\n"
+            f"Вы: Москва\n"
+            f"Бот: Прогноз для Москвы...\n"
+            f"Вы: Река Москва\n"
+            f"Бот: Для реки Москва рекомендую...\n"
+            f"Вы: Какие насадки для леща?\n"
+            f"Бот: Для леща используйте...\n\n"
+            f"📊 **Факторы влияния на клев:**\n"
+            f"• *Давление:* Стабильное (760-763 мм рт.ст.) = хорошо\n"
+            f"• *Температура:* 15-25°C = оптимально\n"
+            f"• *Ветер:* 1-4 м/с = хорошо\n"
+            f"• *Осадки:* Легкий дождь = часто улучшает\n\n"
+            f"*Удачной рыбалки и интересных диалогов!* 🎣"
         )
 
         await update.message.reply_text(help_text, parse_mode='Markdown')
@@ -153,28 +165,179 @@ class FishingForecastBot:
 
         await update.message.reply_text(history_text, parse_mode='Markdown')
 
+    def _is_followup_question(self, text: str) -> bool:
+        """Определяет, является ли сообщение follow-up вопросом"""
+        followup_keywords = [
+            'река', 'озеро', 'водоем', 'водохранилище', 'пруд', 'затон',
+            'насадк', 'приманк', 'наживк', 'прикормк',
+            'снаст', 'удочк', 'спининг', 'фидер', 'поплав',
+            'щук', 'окун', 'лещ', 'карп', 'плотв', 'карась', 'сом', 'судак', 'голавль', 'жерех',
+            'где ловить', 'место', 'совет', 'рекомендац', 'как ловить',
+            'время', 'час', 'утро', 'вечер', 'день', 'ночь',
+            'глубин', 'течени', 'берег', 'залив', 'плес'
+        ]
+
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in followup_keywords)
+
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик текстовых сообщений (запросов прогноза)"""
+        """Обработчик текстовых сообщений с поддержкой диалога"""
         user = update.effective_user
-        region = update.message.text.strip()
+        user_id = user.id
+        message_text = update.message.text.strip()
 
-        print(f"📨 Запрос от {user.id}: {region}")
+        print(f"📨 Сообщение от {user.id}: {message_text}")
 
-        # Проверяем пользователя
-        user_db = db.get_user_by_telegram_id(user.id)
-        if not user_db:
-            # Создаем пользователя если его нет
-            user_data = {
-                'telegram_id': user.id,
-                'username': user.username,
-                'first_name': user.first_name,
-                'last_name': user.last_name
-            }
-            user_id = db.save_user(user_data)
+        # Проверяем контекст пользователя и определяем тип сообщения
+        has_context = user_id in self.user_context
+        is_followup = has_context and self._is_followup_question(message_text)
+
+        # Если есть контекст и это не явно follow-up вопрос, проверяем время
+        if has_context and not is_followup:
+            last_time = self.user_context[user_id].get('last_request_date')
+            if last_time and (datetime.now() - last_time) > timedelta(hours=1):
+                # Контекст устарел (больше 1 часа)
+                del self.user_context[user_id]
+                has_context = False
+
+        if has_context and is_followup:
+            # Обработка follow-up вопроса
+            await self._handle_followup_question(update, user_id, message_text)
         else:
-            user_id = user_db['id']
+            # Новый запрос региона или сброс контекста
+            if has_context:
+                del self.user_context[user_id]  # Сбрасываем старый контекст
+            await self._handle_region_request(update, user_id, message_text)
 
-        # Отправляем сообщение "обрабатывается"
+    async def _handle_followup_question(self, update: Update, user_id: int, question: str):
+        """Обработка follow-up вопросов после прогноза"""
+        processing_msg = await update.message.reply_text(
+            f"🤔 *Анализирую ваш вопрос...*\n\n"
+            f"Учитываю контекст предыдущего прогноза для *{self.user_context[user_id]['last_region']}*",
+            parse_mode='Markdown'
+        )
+
+        try:
+            # Подготавливаем контекст для ИИ
+            last_forecast_text = self.user_context[user_id].get('last_forecast_summary', '')
+            last_region = self.user_context[user_id]['last_region']
+
+            # Отправляем вопрос в ИИ с контекстом
+            ai_response = await self._ask_ai_with_context(last_region, last_forecast_text, question)
+
+            await processing_msg.edit_text(
+                ai_response,
+                parse_mode='Markdown',
+                disable_web_page_preview=True
+            )
+
+            print(f"✅ Ответ на follow-up вопрос отправлен пользователю {user_id}")
+
+        except Exception as e:
+            print(f"❌ Ошибка при обработке follow-up вопроса: {e}")
+            traceback.print_exc()
+            await processing_msg.edit_text(
+                f"❌ *Не удалось обработать вопрос*\n\n"
+                f"Попробуйте задать вопрос иначе или запросите новый прогноз.",
+                parse_mode='Markdown'
+            )
+
+    async def _ask_ai_with_context(self, region: str, forecast_summary: str, question: str) -> str:
+        """Запрос к Groq API с учетом контекста предыдущего прогноза"""
+        try:
+            headers = {
+                "Authorization": f"Bearer {config.GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            }
+
+            prompt = f"""Ты — эксперт-рыболов и гид по рыбалке. Ранее ты дал прогноз клева для региона: {region}
+
+КОНТЕКСТ ПРЕДЫДУЩЕГО ПРОГНОЗА (основные моменты):
+{forecast_summary[:800]}...
+
+ВОПРОС ПОЛЬЗОВАТЕЛЯ: {question}
+
+ТВОЯ ЗАДАЧА:
+1. Ответить на вопрос В КОНТЕКСТЕ ранее данного прогноза для {region}
+2. Если вопрос про конкретный водоем - дать рекомендации именно для этого типа водоема
+3. Дать конкретные практические советы
+4. Сохранять дружелюбный тон опытного рыбака
+
+ФОРМАТ ОТВЕТА:
+🎯 ОТВЕТ НА ВОПРОС: [краткий заголовок]
+
+📝 РЕКОМЕНДАЦИИ:
+• [Конкретный совет 1]
+• [Конкретный совет 2]
+• [Конкретный совет 3]
+
+📍 ДЛЯ РЕГИОНА {region.upper()}:
+[Специфика для данного региона]
+
+🐟 ПРИМЕЧАНИЕ:
+[Дополнительные замечания или предупреждения]
+
+💡 СОВЕТ ЭКСПЕРТА:
+[Фишка или лайфхак от опытного рыбака]"""
+
+            payload = {
+                "model": "llama-3.1-8b-instant",
+                "messages": [
+                    {"role": "system", "content": prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 1200
+            }
+
+            response = requests.post(
+                config.GROQ_API_URL,
+                headers=headers,
+                json=payload,
+                timeout=45
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                answer = result['choices'][0]['message']['content']
+
+                # Добавляем призыв продолжать диалог
+                answer += "\n\n💬 *Можете задать еще вопросы про насадки, места ловли или конкретные виды рыб!*"
+
+                return answer
+            else:
+                return self._get_fallback_followup_response(region, question)
+
+        except Exception as e:
+            print(f"❌ Ошибка запроса к Groq API: {e}")
+            return self._get_fallback_followup_response(region, question)
+
+    def _get_fallback_followup_response(self, region: str, question: str) -> str:
+        """Резервный ответ на follow-up вопрос"""
+        return (
+            f"🎯 *Ответ на вопрос о {region}*\n\n"
+            f"📝 К сожалению, ИИ временно недоступен для углубленного анализа.\n\n"
+            f"💡 *Общие рекомендации:*\n"
+            f"• Для водоемов в районе {region} учитывайте местные особенности\n"
+            f"• Консультируйтесь с местными рыболовами\n"
+            f"• Экспериментируйте с разными насадками\n\n"
+            f"*Запросите новый прогноз для получения актуальных данных.*"
+        )
+
+    async def _handle_region_request(self, update: Update, user_id: int, region: str):
+        """Обработка нового запроса региона"""
+        # Проверяем пользователя
+        user_db = db.get_user_by_telegram_id(user_id)
+        if not user_db:
+            user_data = {
+                'telegram_id': user_id,
+                'username': update.effective_user.username,
+                'first_name': update.effective_user.first_name,
+                'last_name': update.effective_user.last_name
+            }
+            user_db_id = db.save_user(user_data)
+        else:
+            user_db_id = user_db['id']
+
         processing_msg = await update.message.reply_text(
             f"🎣 *Анализирую прогноз для {region}...*\n\n"
             f"1️⃣ Получаю данные погоды...\n"
@@ -221,7 +384,7 @@ class FishingForecastBot:
 
             # 3. Сохраняем запрос в историю
             forecast_data = {
-                'user_id': user_id,
+                'user_id': user_db_id,
                 'region': region,
                 'request_date': datetime.now(),
                 'weather_data': weather_forecast['forecasts'],
@@ -232,7 +395,14 @@ class FishingForecastBot:
 
             request_id = db.save_forecast_request(forecast_data)
 
-            # 4. Формируем финальное сообщение
+            # 4. Сохраняем контекст для follow-up вопросов
+            self.user_context[user_id] = {
+                'last_region': region,
+                'last_forecast_summary': forecast_result["ai_response"][:500],  # Сохраняем краткое содержание
+                'last_request_date': datetime.now()
+            }
+
+            # 5. Формируем финальное сообщение
             weather_text = weather_service.format_weather_for_display(weather_forecast)
             ai_text = forecast_result["ai_response"]
 
@@ -243,19 +413,23 @@ class FishingForecastBot:
                 f"{'=' * 40}\n"
                 f"{ai_text}\n\n"
                 f"{'=' * 40}\n"
+                f"💬 *Теперь можете задать уточняющие вопросы!*\n"
+                f"• Конкретный водоем (река, озеро)\n"
+                f"• Виды рыб\n"
+                f"• Насадки и снасти\n"
+                f"• Места ловли\n\n"
                 f"🆔 *ID запроса:* #{request_id}\n"
                 f"📅 *Запрос обработан:* {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
                 f"*Хорошей рыбалки!* 🎣"
             )
 
-            # Отправляем результат
             await processing_msg.edit_text(
                 final_message,
                 parse_mode='Markdown',
                 disable_web_page_preview=True
             )
 
-            print(f"✅ Прогноз отправлен пользователю {user.id}")
+            print(f"✅ Прогноз отправлен пользователю {user_id}")
 
         except Exception as e:
             print(f"❌ Ошибка при обработке запроса: {e}")
@@ -275,50 +449,48 @@ class FishingForecastBot:
         user = query.from_user
         data = query.data
 
-        print(f"🔄 Callback от {user.id}: {data}")
-
         if data == "history":
             user_db = db.get_user_by_telegram_id(user.id)
             if user_db:
                 history = db.get_user_history(user_db['id'], limit=10)
                 if history:
                     lines = [f"📚 *История запросов:*\n"]
-
                     for i, item in enumerate(history, 1):
                         date_str = item['date'].strftime('%d.%m.%Y %H:%M')
-                        lines.append(
-                            f"{i}. *{item['region']}*\n"
-                            f"   📅 {date_str}\n"
-                            f"   🆔 #{item['id']}\n"
-                        )
-
+                        lines.append(f"{i}. *{item['region']}*\n   📅 {date_str}\n")
                     lines.append(f"\n📊 *Всего запросов:* {len(history)}")
-                    history_text = "\n".join(lines)
-
-                    await query.edit_message_text(
-                        history_text,
-                        parse_mode='Markdown'
-                    )
+                    await query.edit_message_text("\n".join(lines), parse_mode='Markdown')
                     return
 
         elif data == "help":
             help_text = (
-                f"🎣 *{config.BOT_NAME}*\n\n"
-                f"*Быстрая помощь:*\n\n"
-                f"📝 **Как получить прогноз:**\n"
-                f"Просто напишите название города\n\n"
-                f"📊 **Команды:**\n"
-                f"• /start - Главное меню\n"
-                f"• /history - История\n"
-                f"• /help - Помощь\n\n"
-                f"*Примеры регионов:*\n"
-                f"• Москва\n"
-                f"• Санкт-Петербург\n"
-                f"• Сочи\n"
-                f"• Казань\n\n"
-                f"*Удачи на рыбалке!* 🎣"
+                f"🎣 *Быстрая помощь:*\n\n"
+                f"📝 **Новый диалоговый режим:**\n"
+                f"1. Запросите прогноз для региона\n"
+                f"2. Задавайте уточняющие вопросы\n\n"
+                f"💡 **Примеры вопросов:**\n"
+                f"• Река [название] (после прогноза)\n"
+                f"• Какие насадки для [вид рыбы]?\n"
+                f"• Где лучше ловить [вид рыбы]?\n"
+                f"• Какие снасти использовать?\n\n"
+                f"*Попробуйте начать с запроса любого города!*"
             )
             await query.edit_message_text(help_text, parse_mode='Markdown')
+
+        elif data == "example_dialog":
+            example = (
+                f"🎣 *Пример умного диалога:*\n\n"
+                f"👤 *Вы:* Москва\n"
+                f"🤖 *Бот:* Прогноз для Москвы...\n\n"
+                f"👤 *Вы:* Река Москва\n"
+                f"🤖 *Бот:* Для реки Москва рекомендую...\n\n"
+                f"👤 *Вы:* Где ловить щуку?\n"
+                f"🤖 *Бот:* Щуку на реке Москва лучше искать...\n\n"
+                f"👤 *Вы:* Какие воблеры использовать?\n"
+                f"🤖 *Бот:* Для щуки подойдут воблеры...\n\n"
+                f"*Попробуйте такой диалог с ботом!* 🎣"
+            )
+            await query.edit_message_text(example, parse_mode='Markdown')
 
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Глобальный обработчик ошибок"""
@@ -338,44 +510,24 @@ class FishingForecastBot:
 
     def setup_handlers(self, application: Application):
         """Настройка обработчиков команд"""
-        # Команды
         application.add_handler(CommandHandler("start", self.start_command))
         application.add_handler(CommandHandler("help", self.help_command))
         application.add_handler(CommandHandler("history", self.history_command))
-
-        # Текстовые сообщения
-        application.add_handler(MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            self.handle_message
-        ))
-
-        # Callback-запросы
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         application.add_handler(CallbackQueryHandler(self.handle_callback))
-
-        # Обработчик ошибок
         application.add_error_handler(self.error_handler)
 
     def run(self):
         """Запуск бота"""
         try:
-            # Проверяем конфигурацию
             config.validate()
-
-            # Создаем приложение
             self.application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
-
-            # Настраиваем обработчики
             self.setup_handlers(self.application)
-
-            # Запускаем бота
             print(f"🚀 Запускаю бота: {config.BOT_NAME}")
-            print(f"🤖 Бот готов к работе!")
-            print(f"📊 База данных: {config.DB_HOST}:{config.DB_PORT}/{config.DB_NAME}")
-
+            print(f"🤖 Бот готов к работе с поддержкой диалога!")
             self.application.run_polling(allowed_updates=Update.ALL_TYPES)
-
         except Exception as e:
-            print(f"💥 Критическая ошибка при запуске бота: {e}")
+            print(f"💥 Критическая ошибка: {e}")
             traceback.print_exc()
             if db.conn:
                 db.close()
