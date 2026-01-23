@@ -23,7 +23,7 @@ async def handle_ai_chat(question: str) -> str:
         давай советы по снастям, технике ловли, выбору места. Будь дружелюбным и полезным."""
 
         payload = {
-            "model": "llama3-8b-8192",
+            "model": "llama-3.1-8b-instant",
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question}
