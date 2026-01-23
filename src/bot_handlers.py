@@ -192,9 +192,9 @@ class FishingForecastBot:
         # Сначала проверяем, это вопрос к ИИ или запрос прогноза
         if self._is_ai_question(message_text):
             # Отправляем вопрос в ИИ
-            await update.message.answer("🤔 Думаю над ответом...")
+            await update.message.reply_text("🤔 Думаю над ответом...")
             ai_response = await self._handle_ai_chat(message_text)
-            await update.message.answer(ai_response)
+            await update.message.reply_text(ai_response)
             return
 
         # Далее существующая логика для прогнозов
