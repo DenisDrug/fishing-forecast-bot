@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import traceback
 import requests
 
+from .ai_chat_handler import handle_ai_chat
 from .config import config
 from .database import db
 from .weather_service import weather_service
@@ -193,7 +194,7 @@ class FishingForecastBot:
         if self._is_ai_question(message_text):
             # Отправляем вопрос в ИИ
             await update.message.reply_text("🤔 Думаю над ответом...")
-            ai_response = await self._handle_ai_chat(message_text)
+            ai_response = await handle_ai_chat(message_text)
             await update.message.reply_text(ai_response)
             return
 
