@@ -13,6 +13,7 @@ from .weather_service import weather_service
 from .ai_forecaster import ai_forecaster
 
 
+
 class FishingForecastBot:
     """Основной класс Telegram-бота с поддержкой диалога"""
 
@@ -181,33 +182,63 @@ class FishingForecastBot:
         return any(keyword in text_lower for keyword in followup_keywords)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик текстовых сообщений с поддержкой диалога"""
+        """Обработчик текстовых сообщений с поддержкой диалога и ИИ"""
         user = update.effective_user
         user_id = user.id
         message_text = update.message.text.strip()
 
         print(f"📨 Сообщение от {user.id}: {message_text}")
 
-        # Проверяем контекст пользователя и определяем тип сообщения
+        # Сначала проверяем, это вопрос к ИИ или запрос прогноза
+        if self._is_ai_question(message_text):
+            # Отправляем вопрос в ИИ
+            await update.message.answer("🤔 Думаю над ответом...")
+            ai_response = await self._handle_ai_chat(message_text)
+            await update.message.answer(ai_response)
+            return
+
+        # Далее существующая логика для прогнозов
         has_context = user_id in self.user_context
         is_followup = has_context and self._is_followup_question(message_text)
 
-        # Если есть контекст и это не явно follow-up вопрос, проверяем время
         if has_context and not is_followup:
             last_time = self.user_context[user_id].get('last_request_date')
             if last_time and (datetime.now() - last_time) > timedelta(hours=1):
-                # Контекст устарел (больше 1 часа)
                 del self.user_context[user_id]
                 has_context = False
 
         if has_context and is_followup:
-            # Обработка follow-up вопроса
             await self._handle_followup_question(update, user_id, message_text)
         else:
-            # Новый запрос региона или сброс контекста
             if has_context:
-                del self.user_context[user_id]  # Сбрасываем старый контекст
+                del self.user_context[user_id]
             await self._handle_region_request(update, user_id, message_text)
+
+    def _is_ai_question(self, text: str) -> bool:
+        """Определяет, является ли сообщение вопросом для ИИ"""
+        text_lower = text.lower()
+
+        # Вопросы (содержат знак вопроса или вопросительные слова)
+        if '?' in text_lower:
+            return True
+
+        # Вопросительные слова в начале
+        question_words = ['как', 'что', 'почему', 'зачем', 'когда', 'где', 'сколько', 'какой', 'какая', 'какое']
+        first_word = text_lower.split()[0] if text_lower.split() else ''
+        if first_word in question_words:
+            return True
+
+        # Запросы советов/помощи
+        help_words = ['совет', 'подскажи', 'помоги', 'расскажи', 'объясни', 'посоветуй']
+        if any(word in text_lower for word in help_words):
+            return True
+
+        # Общие вопросы о рыбалке
+        fishing_words = ['рыбалк', 'ловить', 'снаст', 'нажив', 'приман', 'техник', 'способ']
+        if any(word in text_lower for word in fishing_words):
+            return True
+
+        return False
 
     async def _handle_followup_question(self, update: Update, user_id: int, question: str):
         """Обработка follow-up вопросов после прогноза"""
