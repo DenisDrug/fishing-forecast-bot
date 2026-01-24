@@ -687,3 +687,24 @@ class FishingForecastBot:
             traceback.print_exc()
             if db.conn:
                 db.close()
+
+    async def _save_to_history(self, user_id: int, query: str, intent: str, response: str):
+        """Сохраняет запрос в историю"""
+        try:
+            # Импортируем здесь чтобы избежать циклических импортов
+            from src.database import save_to_history as db_save_history
+
+            # Обрезаем длинный ответ
+            truncated_response = response[:500] + "..." if len(response) > 500 else response
+
+            await db_save_history(
+                user_id=user_id,
+                query=query,
+                intent=intent,
+                response=truncated_response
+            )
+            print(f"📊 Сохранен запрос #{user_id} типа '{intent}'")
+
+        except Exception as e:
+            print(f"❌ Ошибка сохранения в историю: {e}")
+            # Не падаем, просто логируем ошибку
