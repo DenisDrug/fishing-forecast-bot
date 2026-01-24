@@ -3,6 +3,7 @@ import aiohttp
 import logging
 from typing import Dict, Optional
 from src.config import config
+from src.geoip import GeoIPService
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +11,36 @@ logger = logging.getLogger(__name__)
 class LocationResolver:
     def __init__(self):
         self.geocoding_url = "http://api.openweathermap.org/geo/1.0/direct"
+        self.geoip_service = GeoIPService()
+
+
+    async def resolve_location_for_user(self, location_query: str, user_id: int) -> Optional[Dict]:
+        """Ищет локацию с учетом страны пользователя"""
+        # Получаем страну пользователя из GeoIP
+        user_country = await self.geoip_service.get_user_country(user_id)
+
+        # Очищаем запрос
+        clean_query = self._clean_location_query(location_query)
+
+        # Пробуем найти с приоритетом страны пользователя
+        result = await self.resolve_location(clean_query, user_country)
+        if result:
+            logger.info(f"Найдено в стране пользователя ({user_country}): {result.get('local_name')}")
+            return result
+
+        # Если не нашли, пробуем другие страны СНГ
+        cis_countries = ['BY', 'RU', 'UA', 'KZ', 'MD', 'LT', 'LV', 'EE']
+
+        for country in cis_countries:
+            if country != user_country:  # Пропускаем уже проверенную
+                result = await self.resolve_location(clean_query, country)
+                if result:
+                    logger.info(f"Найдено в соседней стране ({country}): {result.get('local_name')}")
+                    return result
+
+        # Пробуем без указания страны
+        logger.info(f"Пробуем глобальный поиск для: {clean_query}")
+        return await self.resolve_location(clean_query)
 
     async def resolve_location(self, location_query: str, country_hint: str = None) -> Optional[Dict]:
         """Ищет локацию через OpenWeather Geocoding API"""

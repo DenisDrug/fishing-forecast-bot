@@ -18,6 +18,8 @@ from .weather_intelligent_service import IntelligentWeatherService
 from .intelligent_fishing_forecaster import IntelligentFishingForecaster
 from .ai_chat_handler import handle_ai_chat
 from typing import Dict, Any
+from src.geoip import GeoIPService
+from src.location_resolver import LocationResolver
 
 
 class FishingForecastBot:
@@ -29,6 +31,8 @@ class FishingForecastBot:
         self.intent_analyzer = IntentAnalyzer()
         self.weather_service = IntelligentWeatherService()
         self.fishing_forecaster = IntelligentFishingForecaster()
+        self.geoip_service = GeoIPService()
+        self.location_resolver = LocationResolver()
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
@@ -225,19 +229,26 @@ class FishingForecastBot:
             await update.message.reply_text("Для прогноза погоды укажите место...")
             return
 
-        await update.message.reply_text(f"🌤️ Ищу '{location}' и получаю прогноз погоды...")
+        await update.message.reply_text(f"🌤️ Ищу '{location}'...")
 
-        # 1. Получаем погоду через weather_service
-        weather_data = await self.weather_service.get_weather_forecast(location, days)
+        # Используем улучшенный резолвер с учетом страны пользователя
+        resolved = await self.location_resolver.resolve_location_for_user(location, user_id)
 
-        if not weather_data:
+        if not resolved:
             await update.message.reply_text(f"❌ Не удалось найти '{location}'...")
             return
 
-        # 2. Форматируем ответ
-        response = self._format_weather_response(weather_data)
+        # Получаем погоду по координатам
+        weather_data = await self.weather_service.get_weather_forecast_by_coords(
+            resolved['lat'], resolved['lon'], days
+        )
 
-        # 3. Отправляем пользователю
+        if not weather_data:
+            await update.message.reply_text(f"❌ Не удалось получить прогноз...")
+            return
+
+        # Форматируем ответ
+        response = self._format_weather_response(weather_data)
         await update.message.reply_text(response, parse_mode="Markdown")
 
     async def _ask_for_clarification(self, update: Update, original_query: str,

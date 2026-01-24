@@ -196,3 +196,35 @@ class IntelligentWeatherService:
         except Exception as e:
             logger.error(f"Ошибка поиска локаций: {e}")
             return []
+
+    async def get_weather_forecast_by_coords(self, lat: float, lon: float, days: int = 1) -> Optional[Dict]:
+        """Получает прогноз по координатам"""
+        try:
+            params = {
+                'lat': lat,
+                'lon': lon,
+                'appid': config.OPENWEATHER_API_KEY,
+                'units': 'metric',
+                'lang': 'ru',
+                'cnt': days * 8
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.base_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Создаем resolved_location для форматирования
+                        resolved = {
+                            'name': data['city']['name'],
+                            'local_name': data['city']['name'],
+                            'country': data['city']['country'],
+                            'lat': lat,
+                            'lon': lon
+                        }
+                        return self._format_weather_response(data, resolved, days)
+                    else:
+                        logger.error(f"Weather API error: {response.status}")
+                        return None
+        except Exception as e:
+            logger.error(f"Error getting weather by coords: {e}")
+            return None
