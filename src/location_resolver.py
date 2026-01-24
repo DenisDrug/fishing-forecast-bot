@@ -12,15 +12,33 @@ class LocationResolver:
         self.geocoding_url = "http://api.openweathermap.org/geo/1.0/direct"
 
     async def resolve_location(self, location_query: str, country_hint: str = None) -> Optional[Dict]:
-        """
-        Ищет локацию через OpenWeather Geocoding API
-        Поддерживает русские названия городов, районов, областей
-        """
+        """Ищет локацию через OpenWeather Geocoding API"""
         try:
-            # Очищаем запрос
             clean_query = self._clean_location_query(location_query)
 
-            # Формируем запрос к геокодеру
+            # Пробуем разные варианты запроса
+            search_variants = []
+
+            # 1. Оригинальный запрос
+            search_variants.append(clean_query)
+
+            # 2. Без окончания "е" (предположительный предложный падеж)
+            if clean_query.lower().endswith('е'):
+                base_form = clean_query[:-1] + 'а'  # "Лиде" -> "Лида"
+                search_variants.append(base_form)
+
+            # 3. Для популярных городов добавляем страны
+            popular_with_country = {
+                'лида': 'BY', 'гродно': 'BY', 'минск': 'BY',
+                'москва': 'RU', 'санкт-петербург': 'RU',
+                'киев': 'UA', 'вильнюс': 'LT'
+            }
+
+            query_lower = clean_query.lower()
+            if query_lower in popular_with_country and not country_hint:
+                country_hint = popular_with_country[query_lower]
+
+            # Формируем поисковый запрос
             if country_hint:
                 search_query = f"{clean_query},{country_hint}"
             else:
@@ -28,62 +46,90 @@ class LocationResolver:
 
             params = {
                 'q': search_query,
-                'limit': 5,  # Берем несколько результатов
+                'limit': 10,  # Больше результатов для лучшего поиска
                 'appid': config.OPENWEATHER_API_KEY,
-                'lang': 'ru'  # Для русских названий
+                'lang': 'ru'
             }
-
-            logger.info(f"Geocoding search: {search_query}")
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(self.geocoding_url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
 
-                        if not data or len(data) == 0:
-                            logger.warning(f"Локация не найдена: {clean_query}")
+                        if not data:
                             return None
 
-                        # Выбираем лучший результат
-                        best_match = self._select_best_match(data, clean_query)
-                        return best_match
+                        # Ищем лучшее совпадение
+                        best_match = self._find_best_match(data, clean_query)
+                        if best_match:
+                            return best_match
+
+                        # Если не нашли, пробуем без страны
+                        if country_hint:
+                            params['q'] = clean_query
+                            async with session.get(self.geocoding_url, params=params) as response2:
+                                if response2.status == 200:
+                                    data2 = await response2.json()
+                                    return self._find_best_match(data2, clean_query) if data2 else None
+
+                        return None
                     else:
-                        error_text = await response.text()
-                        logger.error(f"Geocoding API error {response.status}: {error_text}")
                         return None
 
         except Exception as e:
             logger.error(f"Ошибка геокодинга: {e}")
             return None
 
+    def _find_best_match(self, results: list, original_query: str) -> Optional[Dict]:
+        """Находит лучшее совпадение среди результатов геокодинга"""
+        original_lower = original_query.lower()
+
+        for result in results:
+            local_names = result.get('local_names', {})
+
+            # Проверяем русское название
+            ru_name = local_names.get('ru', '').lower()
+
+            # Проверяем английское название
+            en_name = result.get('name', '').lower()
+
+            # Проверяем похожесть
+            if (original_lower in ru_name or
+                    original_lower in en_name or
+                    ru_name in original_lower or
+                    en_name in original_lower):
+                return self._format_location_result(result)
+
+        # Если не нашли точного совпадения, берем первый результат
+        if results:
+            return self._format_location_result(results[0])
+
+        return None
+
     def _clean_location_query(self, query: str) -> str:
-        """Очищает запрос локации от лишних слов"""
-        # Убираем предлоги и общие слова
-        query_lower = query.lower().strip()
+        """Очищает запрос локации"""
+        query = query.strip()
 
-        # Удаляем общие предлоги
-        stop_words = {'в', 'на', 'для', 'около', 'возле', 'рядом', 'по', 'у', 'с'}
+        # Убираем предлоги в начале
+        stop_words_start = ['в', 'на', 'для', 'около', 'возле', 'рядом', 'по', 'у', 'с']
+        words = query.split()
 
-        words = query_lower.split()
-        cleaned_words = []
+        # Если первое слово - предлог, убираем его
+        if words and words[0].lower() in stop_words_start:
+            words = words[1:]
 
-        for word in words:
-            # Убираем запятые и точки
-            word = word.strip('.,!?;:')
-            if word not in stop_words:
-                cleaned_words.append(word)
+        # Убираем предлоги в конце
+        stop_words_end = ['на', 'в', 'для', 'по', 'у', 'с']
+        if words and words[-1].lower() in stop_words_end:
+            words = words[:-1]
 
-        # Если все слова убрали, возвращаем оригинал
-        if not cleaned_words:
-            return query.strip()
+        if not words:
+            return query
 
-        cleaned = ' '.join(cleaned_words)
+        result = ' '.join(words)
 
-        # Если осталось одно слово - возвращаем с заглавной буквы
-        if ' ' not in cleaned:
-            return cleaned.title()
-
-        return cleaned
+        # Возвращаем как есть - геокодинг сам разберется
+        return result
 
     def _select_best_match(self, results: list, original_query: str) -> Dict:
         """Выбирает лучший результат из найденных"""
@@ -141,14 +187,40 @@ class LocationResolver:
 
     async def resolve_with_country_hints(self, location_query: str) -> Optional[Dict]:
         """Пробует найти локацию с разными подсказками по странам"""
-        # Популярные страны для рыбалки
+        # Очищаем запрос от "Беларусь", "Россия" и т.д.
+        clean_query = self._clean_location_query(location_query)
+
+        # Убираем названия стран из запроса
+        country_words = ['беларусь', 'белоруссия', 'россия', 'украина', 'польша',
+                         'литва', 'латвия', 'эстония', 'казахстан']
+        query_words = clean_query.split()
+        filtered_words = [w for w in query_words if w.lower() not in country_words]
+        clean_query = ' '.join(filtered_words) if filtered_words else clean_query
+
+        # Для популярных городов - добавляем страну автоматически
+        popular_cities = {
+            'лида': 'BY', 'гродно': 'BY', 'минск': 'BY', 'брест': 'BY',
+            'гомель': 'BY', 'витебск': 'BY', 'могилев': 'BY',
+            'москва': 'RU', 'санкт-петербург': 'RU', 'сочи': 'RU',
+            'киев': 'UA', 'львов': 'UA', 'одесса': 'UA',
+            'вильнюс': 'LT', 'каунас': 'LT', 'клайпеда': 'LT'
+        }
+
+        city_lower = clean_query.lower()
+        if city_lower in popular_cities:
+            country_hint = popular_cities[city_lower]
+            result = await self.resolve_location(clean_query, country_hint)
+            if result:
+                return result
+
+        # Пробуем страны по порядку
         country_hints = ['BY', 'RU', 'UA', 'LT', 'LV', 'PL', 'EE', 'MD', 'KZ']
 
         for country in country_hints:
-            result = await self.resolve_location(location_query, country)
+            result = await self.resolve_location(clean_query, country)
             if result:
-                logger.info(f"Found with country hint {country}: {result['local_name']}")
+                logger.info(f"Найдено с подсказкой страны {country}: {result.get('local_name')}")
                 return result
 
         # Пробуем без подсказки страны
-        return await self.resolve_location(location_query)
+        return await self.resolve_location(clean_query)
