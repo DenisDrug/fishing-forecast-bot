@@ -13,6 +13,11 @@ from .database import db
 from .weather_service import weather_service
 from .ai_forecaster import ai_forecaster
 
+from .intent_analyzer import IntentAnalyzer
+from .weather_intelligent_service import IntelligentWeatherService
+from .intelligent_fishing_forecaster import IntelligentFishingForecaster
+from .ai_chat_handler import handle_ai_chat
+from typing import Dict, Any
 
 
 class FishingForecastBot:
@@ -21,6 +26,9 @@ class FishingForecastBot:
     def __init__(self):
         self.application = None
         self.user_context = {}  # Храним контекст пользователей: {user_id: {last_region, last_forecast, last_request_date}}
+        self.intent_analyzer = IntentAnalyzer()
+        self.weather_service = IntelligentWeatherService()
+        self.fishing_forecaster = IntelligentFishingForecaster()
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
@@ -183,37 +191,142 @@ class FishingForecastBot:
         return any(keyword in text_lower for keyword in followup_keywords)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Обработчик текстовых сообщений с поддержкой диалога и ИИ"""
+        """Интеллектуальный обработчик сообщений"""
         user = update.effective_user
         user_id = user.id
         message_text = update.message.text.strip()
 
         print(f"📨 Сообщение от {user.id}: {message_text}")
 
-        # Сначала проверяем, это вопрос к ИИ или запрос прогноза
-        if self._is_ai_question(message_text):
-            # Отправляем вопрос в ИИ
-            await update.message.reply_text("🤔 Думаю над ответом...")
-            ai_response = await handle_ai_chat(message_text)
-            await update.message.reply_text(ai_response)
+        # Анализируем намерение пользователя
+        analysis = self.intent_analyzer.analyze(message_text)
+
+        # Обрабатываем в зависимости от намерения
+        if analysis['intent'] == 'weather':
+            await self._handle_weather_request(update, analysis)
+
+        elif analysis['intent'] == 'fishing_forecast':
+            await self._handle_fishing_request(update, analysis, message_text)
+
+        elif analysis['intent'] == 'general_question':
+            await self._handle_general_question(update, message_text)
+
+        else:
+            await update.message.reply_text(
+                "Не совсем понял ваш запрос. Вы можете спросить о погоде или прогнозе клева.")
+
+    async def _handle_weather_request(self, update: Update, analysis: Dict):
+        """Обработка запроса погоды"""
+        user_id = update.effective_user.id  # Добавляем получение user_id
+        message_text = update.message.text  # Добавляем получение message_text
+        location = analysis.get('location')
+        days = analysis.get('days', 1)
+
+        if not location:
+            await update.message.reply_text(
+                "Для прогноза погоды укажите место. Например: 'Погода в Москве' или 'Какая погода в Лиде на завтра?'"
+            )
             return
 
-        # Далее существующая логика для прогнозов
-        has_context = user_id in self.user_context
-        is_followup = has_context and self._is_followup_question(message_text)
+        await update.message.reply_text(f"🌤️ Получаю прогноз погоды для {location}...")
 
-        if has_context and not is_followup:
-            last_time = self.user_context[user_id].get('last_request_date')
-            if last_time and (datetime.now() - last_time) > timedelta(hours=1):
-                del self.user_context[user_id]
-                has_context = False
+        weather_data = await self.weather_service.get_weather_forecast(location, days)
 
-        if has_context and is_followup:
-            await self._handle_followup_question(update, user_id, message_text)
+        if not weather_data:
+            await update.message.reply_text(
+                f"❌ Не удалось получить прогноз для '{location}'. Проверьте название места."
+            )
+            return
+
+        # Форматируем и отправляем ответ
+        response = self._format_weather_response(weather_data)
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+        # Сохраняем в историю - теперь все переменные есть
+        await self._save_to_history(user_id, message_text, 'weather', response)
+
+    async def _handle_fishing_request(self, update: Update, analysis: Dict, original_query: str):
+        """Обработка запроса прогноза клева"""
+        user_id = update.effective_user.id
+        location = analysis.get('location')
+        days = analysis.get('days', 1)
+
+        # Если нет локации - уточняем
+        if not location:
+            await update.message.reply_text(
+                "Для прогноза клева укажите место. Например: 'Какой клев в Лиде?' или 'Будет ли рыба клевать завтра в Москве?'"
+            )
+            return
+
+        await update.message.reply_text(f"🎣 Анализирую условия для рыбалки в {location}...")
+
+        # Получаем погоду для анализа
+        weather_data = await self.weather_service.get_weather_forecast(location, days)
+
+        if not weather_data:
+            await update.message.reply_text(
+                f"❌ Не удалось получить данные для '{location}'. Проверьте название места."
+            )
+            return
+
+        # Получаем прогноз клева от ИИ
+        forecast = await self.fishing_forecaster.analyze_fishing_conditions(
+            weather_data,
+            original_query
+        )
+
+        # Форматируем ответ
+        response = f"🎣 *Прогноз клева для {location}*\n\n{forecast}"
+        await update.message.reply_text(response, parse_mode="Markdown")
+
+        # Сохраняем в историю
+        await self._save_to_history(user_id, original_query, 'fishing_forecast', response)
+
+    async def _handle_general_question(self, update: Update, question: str):
+        """Обработка общих вопросов о рыбалке"""
+        await update.message.reply_text("🤔 Думаю над ответом...")
+        ai_response = await handle_ai_chat(question)
+        await update.message.reply_text(ai_response)
+
+    def _format_weather_response(self, weather_data: Dict) -> str:
+        """Форматирует ответ о погоде"""
+        location = weather_data['location']
+        days = weather_data['days']
+
+        response = f"🌤️ *Прогноз погоды для {location}*\n\n"
+
+        for day in weather_data['forecast']:
+            emoji = self._get_weather_emoji(day['weather'])
+            response += f"📅 *{day['date']}* {emoji}\n"
+            response += f"• {day['weather'].capitalize()}\n"
+            response += f"• Температура: {day['temp_min']}°C...{day['temp_max']}°C\n"
+            response += f"• Давление: {day['pressure']} мм рт.ст.\n"
+            response += f"• Влажность: {day['humidity']}%\n"
+            response += f"• Ветер: {day['wind_speed']} м/с\n"
+            if day['precipitation'] > 0:
+                response += f"• Осадки: {day['precipitation']} мм\n"
+            response += "\n"
+
+        return response
+
+    def _get_weather_emoji(self, weather_description: str) -> str:
+        """Возвращает эмодзи для погоды"""
+        weather_lower = weather_description.lower()
+
+        if 'ясно' in weather_lower or 'солн' in weather_lower:
+            return "☀️"
+        elif 'облач' in weather_lower:
+            return "☁️"
+        elif 'дожд' in weather_lower or 'лив' in weather_lower:
+            return "🌧️"
+        elif 'снег' in weather_lower:
+            return "❄️"
+        elif 'туман' in weather_lower:
+            return "🌫️"
+        elif 'гроз' in weather_lower:
+            return "⛈️"
         else:
-            if has_context:
-                del self.user_context[user_id]
-            await self._handle_region_request(update, user_id, message_text)
+            return "🌤️"
 
     def _is_ai_question(self, text: str) -> bool:
         """Определяет, является ли сообщение вопросом для ИИ"""
