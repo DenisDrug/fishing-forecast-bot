@@ -221,40 +221,54 @@ class FishingForecastBot:
         location = analysis.get('location')
         days = analysis.get('days', 1)
 
-        print(f"DEBUG: Запрос погоды. location={location}, days={days}")  # Добавить
-
         if not location:
-            await update.message.reply_text(
-                "Для прогноза погоды укажите место. Например: 'Погода в Лиде' или 'Какая погода в Лидском районе на завтра?'"
-            )
+            await update.message.reply_text("Для прогноза погоды укажите место...")
             return
 
-        try:  # Добавить try-except
-            await update.message.reply_text(f"🌤️ Ищу '{location}' и получаю прогноз погоды...")
+        await update.message.reply_text(f"🌤️ Ищу '{location}' и получаю прогноз погоды...")
 
-            weather_data = await self.weather_service.get_weather_forecast(location, days)
+        # 1. Получаем погоду через weather_service
+        weather_data = await self.weather_service.get_weather_forecast(location, days)
 
-            if not weather_data:
-                await update.message.reply_text(
-                    f"❌ Не удалось найти '{location}'. Попробуйте уточнить: 'Москва', 'Лида', 'Лидский район'"
-                )
-                return
+        if not weather_data:
+            await update.message.reply_text(f"❌ Не удалось найти '{location}'...")
+            return
 
-            # Показываем какое название нашли
-            resolved_name = weather_data.get('resolved_name', location)
-            if resolved_name.lower() != location.lower():
-                await update.message.reply_text(f"📍 Найдено: {resolved_name}")
+        # 2. Форматируем ответ
+        response = self._format_weather_response(weather_data)
 
-            # Форматируем и отправляем ответ
-            response = self._format_weather_response(weather_data)
-            await update.message.reply_text(response, parse_mode="Markdown")
+        # 3. Отправляем пользователю
+        await update.message.reply_text(response, parse_mode="Markdown")
 
-            # Сохраняем в историю
-            await self._save_to_history(user_id, message_text, 'weather', response)
+    async def _ask_for_clarification(self, update: Update, original_query: str,
+                                     locations: list, days: int):
+        """Спрашивает уточнение при нескольких возможных локациях"""
+        message = f"Найдено несколько мест по запросу '{original_query}':\n\n"
 
-        except Exception as e:  # Добавить обработку ошибок
-            print(f"ERROR in _handle_weather_request: {e}")
-            await update.message.reply_text("❌ Произошла ошибка при получении погоды. Попробуйте еще раз.")
+        for i, loc in enumerate(locations[:5], 1):  # Показываем первые 5
+            country = loc.get('country', '')
+            state = loc.get('state', '')
+            name = loc.get('local_name', loc.get('name', 'Неизвестно'))
+
+            message += f"{i}. {name}"
+            if state:
+                message += f", {state}"
+            if country:
+                message += f" ({country})"
+            message += "\n"
+
+        message += "\nУточните, какое место вас интересует? Например: '1' или 'Лида, Беларусь'"
+
+        # Сохраняем контекст для follow-up
+        context_data = {
+            'possible_locations': locations,
+            'original_query': original_query,
+            'days': days,
+            'action': 'weather_clarify'
+        }
+        self.user_context[update.effective_user.id] = context_data
+
+        await update.message.reply_text(message)
 
     async def _handle_fishing_request(self, update: Update, analysis: Dict, original_query: str):
         """Обработка запроса прогноза клева"""

@@ -224,3 +224,35 @@ class LocationResolver:
 
         # Пробуем без подсказки страны
         return await self.resolve_location(clean_query)
+
+    async def resolve_with_priority(self, location_query: str) -> Optional[Dict]:
+        """Ищет локацию с приоритетом для стран СНГ"""
+        clean_query = self._clean_location_query(location_query)
+
+        # Страны в порядке приоритета для русскоязычных пользователей
+        priority_countries = ['BY', 'RU', 'UA', 'KZ', 'LT', 'LV', 'EE', 'MD', 'PL']
+
+        all_results = []
+
+        # Собираем результаты из всех стран
+        for country in priority_countries:
+            result = await self.resolve_location(clean_query, country)
+            if result:
+                all_results.append(result)
+
+        # Если нашли результаты - выбираем лучший
+        if all_results:
+            # Предпочитаем города с русскими названиями
+            for result in all_results:
+                local_names = result.get('local_names', {})
+                if 'ru' in local_names:
+                    # Проверяем что русское название похоже на запрос
+                    ru_name = local_names['ru'].lower()
+                    if clean_query.lower() in ru_name or ru_name in clean_query.lower():
+                        return result
+
+            # Иначе возвращаем первый результат
+            return all_results[0]
+
+        # Если не нашли в приоритетных странах, пробуем глобально
+        return await self.resolve_location(clean_query)

@@ -148,3 +148,51 @@ class IntelligentWeatherService:
             })
 
         return formatted_response
+
+    async def find_possible_locations(self, location_query: str) -> list:
+        """Находит все возможные варианты локаций"""
+        try:
+            clean_query = self.location_resolver._clean_location_query(location_query)
+
+            # Запрашиваем больше результатов
+            params = {
+                'q': clean_query,
+                'limit': 10,
+                'appid': config.OPENWEATHER_API_KEY,
+                'lang': 'ru'
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                        "http://api.openweathermap.org/geo/1.0/direct",
+                        params=params
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+
+                        formatted_results = []
+                        for item in data:
+                            formatted = self.location_resolver._format_location_result(item)
+                            formatted_results.append(formatted)
+
+                        # Сортируем: сначала страны СНГ, потом с русскими названиями
+                        cis_countries = ['BY', 'RU', 'UA', 'KZ', 'MD']
+
+                        def sort_key(loc):
+                            score = 0
+                            # Приоритет странам СНГ
+                            if loc.get('country') in cis_countries:
+                                score += 100
+                            # Приоритет русским названиям
+                            if loc.get('local_name') and loc.get('local_name') != loc.get('name'):
+                                score += 50
+                            return -score  # Сортировка по убыванию
+
+                        formatted_results.sort(key=sort_key)
+                        return formatted_results
+
+                    return []
+
+        except Exception as e:
+            logger.error(f"Ошибка поиска локаций: {e}")
+            return []
