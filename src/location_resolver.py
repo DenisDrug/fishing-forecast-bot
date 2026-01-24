@@ -58,16 +58,32 @@ class LocationResolver:
 
     def _clean_location_query(self, query: str) -> str:
         """Очищает запрос локации от лишних слов"""
-        # Убираем предлоги и общие слова, но сохраняем структуру
-        words = query.strip().split()
+        # Убираем предлоги и общие слова
+        query_lower = query.lower().strip()
 
-        # Если запрос короткий (1-2 слова), убираем предлоги
-        if len(words) <= 3:
-            stop_words = {'в', 'на', 'для', 'около', 'возле', 'рядом', 'по', 'у'}
-            cleaned = [w for w in words if w.lower() not in stop_words]
-            return ' '.join(cleaned)
+        # Удаляем общие предлоги
+        stop_words = {'в', 'на', 'для', 'около', 'возле', 'рядом', 'по', 'у', 'с'}
 
-        return query.strip()
+        words = query_lower.split()
+        cleaned_words = []
+
+        for word in words:
+            # Убираем запятые и точки
+            word = word.strip('.,!?;:')
+            if word not in stop_words:
+                cleaned_words.append(word)
+
+        # Если все слова убрали, возвращаем оригинал
+        if not cleaned_words:
+            return query.strip()
+
+        cleaned = ' '.join(cleaned_words)
+
+        # Если осталось одно слово - возвращаем с заглавной буквы
+        if ' ' not in cleaned:
+            return cleaned.title()
+
+        return cleaned
 
     def _select_best_match(self, results: list, original_query: str) -> Dict:
         """Выбирает лучший результат из найденных"""

@@ -216,34 +216,45 @@ class FishingForecastBot:
                 "Не совсем понял ваш запрос. Вы можете спросить о погоде или прогнозе клева.")
 
     async def _handle_weather_request(self, update: Update, analysis: Dict):
-        """Обработка запроса погоды"""
-        user_id = update.effective_user.id  # Добавляем получение user_id
-        message_text = update.message.text  # Добавляем получение message_text
+        user_id = update.effective_user.id
+        message_text = update.message.text
         location = analysis.get('location')
         days = analysis.get('days', 1)
 
+        print(f"DEBUG: Запрос погоды. location={location}, days={days}")  # Добавить
+
         if not location:
             await update.message.reply_text(
-                "Для прогноза погоды укажите место. Например: 'Погода в Москве' или 'Какая погода в Лиде на завтра?'"
+                "Для прогноза погоды укажите место. Например: 'Погода в Лиде' или 'Какая погода в Лидском районе на завтра?'"
             )
             return
 
-        await update.message.reply_text(f"🌤️ Получаю прогноз погоды для {location}...")
+        try:  # Добавить try-except
+            await update.message.reply_text(f"🌤️ Ищу '{location}' и получаю прогноз погоды...")
 
-        weather_data = await self.weather_service.get_weather_forecast(location, days)
+            weather_data = await self.weather_service.get_weather_forecast(location, days)
 
-        if not weather_data:
-            await update.message.reply_text(
-                f"❌ Не удалось получить прогноз для '{location}'. Проверьте название места."
-            )
-            return
+            if not weather_data:
+                await update.message.reply_text(
+                    f"❌ Не удалось найти '{location}'. Попробуйте уточнить: 'Москва', 'Лида', 'Лидский район'"
+                )
+                return
 
-        # Форматируем и отправляем ответ
-        response = self._format_weather_response(weather_data)
-        await update.message.reply_text(response, parse_mode="Markdown")
+            # Показываем какое название нашли
+            resolved_name = weather_data.get('resolved_name', location)
+            if resolved_name.lower() != location.lower():
+                await update.message.reply_text(f"📍 Найдено: {resolved_name}")
 
-        # Сохраняем в историю - теперь все переменные есть
-        await self._save_to_history(user_id, message_text, 'weather', response)
+            # Форматируем и отправляем ответ
+            response = self._format_weather_response(weather_data)
+            await update.message.reply_text(response, parse_mode="Markdown")
+
+            # Сохраняем в историю
+            await self._save_to_history(user_id, message_text, 'weather', response)
+
+        except Exception as e:  # Добавить обработку ошибок
+            print(f"ERROR in _handle_weather_request: {e}")
+            await update.message.reply_text("❌ Произошла ошибка при получении погоды. Попробуйте еще раз.")
 
     async def _handle_fishing_request(self, update: Update, analysis: Dict, original_query: str):
         """Обработка запроса прогноза клева"""
