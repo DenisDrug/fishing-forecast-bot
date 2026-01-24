@@ -11,42 +11,95 @@ class IntelligentWeatherService:
     def __init__(self):
         self.base_url = config.OPENWEATHER_API_URL
 
-    async def get_weather_forecast(self, location: str, days: int = 1) -> Optional[Dict]:
-        """Получает прогноз погоды для локации"""
+    async def get_weather_forecast(self, location_query: str, days: int = 1) -> Optional[Dict]:
+        """Получает прогноз погоды для любой локации"""
         try:
+            # Пробуем с подсказками стран
+            resolved = await self.location_resolver.resolve_with_country_hints(location_query)
+
+            if not resolved:
+                # Если не нашли через геокодинг, пробуем прямой запрос по названию
+                logger.warning(f"Геокодинг не нашел: {location_query}, пробуем прямой запрос")
+                return await self._try_direct_city_query(location_query, days)
+
+            lat = resolved['lat']
+            lon = resolved['lon']
+
+            logger.info(f"Найдена локация: {resolved.get('local_name')} ({lat}, {lon})")
+
+            # Запрашиваем погоду по координатам
             params = {
-                'q': location,
+                'lat': lat,
+                'lon': lon,
                 'appid': config.OPENWEATHER_API_KEY,
                 'units': 'metric',
                 'lang': 'ru',
-                'cnt': days * 8  # 8 запросов в день
+                'cnt': days * 8
             }
 
             async with aiohttp.ClientSession() as session:
                 async with session.get(self.base_url, params=params) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return self._format_weather_response(data, location, days)
+                        return self._format_weather_response(data, resolved, days)
                     else:
-                        logger.error(f"Ошибка API погоды: {response.status}")
+                        error_text = await response.text()
+                        logger.error(f"Ошибка Weather API {response.status}: {error_text}")
                         return None
 
         except Exception as e:
             logger.error(f"Ошибка получения погоды: {e}")
             return None
 
-    def _format_weather_response(self, data: Dict, location: str, days: int) -> Dict:
-        """Форматирует ответ о погоде"""
+    async def _try_direct_city_query(self, location_query: str, days: int) -> Optional[Dict]:
+        """Прямой запрос по названию города (fallback)"""
+        try:
+            params = {
+                'q': location_query,
+                'appid': config.OPENWEATHER_API_KEY,
+                'units': 'metric',
+                'lang': 'ru',
+                'cnt': days * 8
+            }
+
+            async with aiohttp.ClientSession() as session:
+                async with session.get(self.base_url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Создаем минимальный resolved_location
+                        resolved = {
+                            'name': data['city']['name'],
+                            'local_name': data['city']['name'],
+                            'country': data['city']['country']
+                        }
+                        return self._format_weather_response(data, resolved, days)
+                    else:
+                        return None
+        except:
+            return None
+
+    def _format_weather_response(self, data: Dict, resolved_location: Dict, days: int) -> Dict:
+        """Форматирует ответ о погоде с использованием найденной локации"""
         if not data or 'list' not in data:
             return None
 
+        # Берем city из ответа API (английское название)
         city = data['city']['name']
         country = data['city']['country']
 
-        # Формируем прогноз по дням
+        # Используем русское название из resolved_location если есть
+        russian_name = resolved_location.get('local_name', city)
+
+        # Форматируем отображаемое название
+        country_names = {'BY': 'Беларусь', 'RU': 'Россия', 'UA': 'Украина',
+                         'LT': 'Литва', 'LV': 'Латвия', 'PL': 'Польша',
+                         'EE': 'Эстония', 'MD': 'Молдова', 'KZ': 'Казахстан'}
+        country_display = country_names.get(country, country)
+
+        # Остальной код БЕЗ ИЗМЕНЕНИЙ
         forecast_by_day = {}
 
-        for item in data['list'][:days * 8]:  # Берем только нужное количество периодов
+        for item in data['list'][:days * 8]:
             date = item['dt_txt'].split()[0]
 
             if date not in forecast_by_day:
@@ -71,9 +124,10 @@ class IntelligentWeatherService:
                 day_data['clouds'].append(item['clouds']['all'])
                 day_data['precipitation'] += item.get('rain', {}).get('3h', 0) + item.get('snow', {}).get('3h', 0)
 
-        # Форматируем ответ
+        # Форматируем ответ с русским названием
         formatted_response = {
-            'location': f"{city}, {country}",
+            'location': f"{russian_name}, {country_display}",
+            'original_location': f"{city}, {country}",
             'days': days,
             'forecast': []
         }
