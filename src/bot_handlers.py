@@ -357,24 +357,26 @@ class FishingForecastBot:
         """Определяет, является ли сообщение вопросом для ИИ"""
         text_lower = text.lower()
 
-        # Вопросы (содержат знак вопроса или вопросительные слова)
+        # Если начинается с вопросительных слов И НЕ содержит указание на город
+        question_starters = {'какая', 'какой', 'какое', 'какие', 'как', 'что',
+                             'почему', 'зачем', 'когда', 'где', 'сколько'}
+
+        first_word = text_lower.split()[0] if text_lower.split() else ''
+
+        # Если начинается с вопросительного слова И содержит "погод" или "клев"
+        # то это запрос погоды, а не ИИ-вопрос
+        if first_word in question_starters:
+            if 'погод' in text_lower or 'клев' in text_lower or 'рыб' in text_lower:
+                return False
+            return True
+
+        # Обычные вопросы с "?"
         if '?' in text_lower:
             return True
 
-        # Вопросительные слова в начале
-        question_words = ['как', 'что', 'почему', 'зачем', 'когда', 'где', 'сколько', 'какой', 'какая', 'какое']
-        first_word = text_lower.split()[0] if text_lower.split() else ''
-        if first_word in question_words:
-            return True
-
-        # Запросы советов/помощи
-        help_words = ['совет', 'подскажи', 'помоги', 'расскажи', 'объясни', 'посоветуй']
-        if any(word in text_lower for word in help_words):
-            return True
-
-        # Общие вопросы о рыбалке
-        fishing_words = ['рыбалк', 'ловить', 'снаст', 'нажив', 'приман', 'техник', 'способ']
-        if any(word in text_lower for word in fishing_words):
+        # Запросы советов
+        advice_words = {'совет', 'подскажи', 'помоги', 'расскажи', 'объясни', 'посоветуй'}
+        if any(word in text_lower for word in advice_words):
             return True
 
         return False
