@@ -3,6 +3,7 @@ import aiohttp
 import logging
 from typing import Dict, Optional, List
 from src.config import config
+from src.location_resolver import LocationResolver
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +11,7 @@ logger = logging.getLogger(__name__)
 class IntelligentWeatherService:
     def __init__(self):
         self.base_url = config.OPENWEATHER_API_URL
+        self.location_resolver = LocationResolver()
 
     async def get_weather_forecast(self, location_query: str, days: int = 1) -> Optional[Dict]:
         """Получает прогноз погоды для любой локации"""
