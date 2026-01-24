@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 class IntelligentWeatherService:
     def __init__(self):
-        self.base_url = config.WEATHER_API_URL
+        self.base_url = config.OPENWEATHER_API_URL
 
     async def get_weather_forecast(self, location: str, days: int = 1) -> Optional[Dict]:
         """Получает прогноз погоды для локации"""
