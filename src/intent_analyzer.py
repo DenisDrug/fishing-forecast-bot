@@ -36,8 +36,137 @@ class IntentAnalyzer:
                 r'на\s+(\d+)\s+дн[еяя]',
                 r'на\s+недел[юе]', r'на\s+выходные',
                 r'в\s+субботу', r'в\s+воскресенье'
+            ],
+            'ai_question': [  # НОВОЕ: паттерны для AI-вопросов
+                r'совет[ауы]?', r'подскажи(те)?', r'помоги(те)?', r'расскажи(те)?',
+                r'объясни(те)?', r'что.*посоветуешь', r'как.*лучше', r'что.*лучше',
+                r'на\s+что.*ловить', r'какую.*наживку', r'какие.*снасти',
+                r'техник[ау]', r'способ[ауы]?', r'метод[ауы]?', r'рекомендац',
+                r'посоветуй(те)?', r'дай.*совет', r'как\s+ловить', r'как\s+поймать',
+                r'нажив[аок]', r'снаст[ьи]', r'приман[аок]', r'удоч[аок]',
+                r'крюч[аок]', r'леск[ау]', r'катушк[ауи]', r'воблер[ауы]?',
+                r'блесн[ауы]?', r'прикорм[аок]', r'фидер[ауы]?', r'спиннинг[ауы]?',
+                r'поплав[аок]'
             ]
         }
+
+        # Ключевые слова для AI-вопросов
+        self.ai_keywords = [
+            'совет', 'подскажи', 'помоги', 'расскажи', 'объясни',
+            'посоветуй', 'рекомендац', 'как лучше', 'что лучше',
+            'на что ловить', 'какую наживку', 'какие снасти',
+            'техник', 'способ', 'метод', 'дай совет'
+        ]
+
+        # Вопросительные слова
+        self.question_words = ['как', 'что', 'почему', 'где', 'когда',
+                               'зачем', 'какой', 'какая', 'какие', 'чем']
+
+        # Известные города
+        self.known_cities = [
+            'лида', 'минск', 'москва', 'гомель', 'брест',
+            'витебск', 'гродно', 'могилев', 'могилёв',
+            'санкт-петербург', 'спб', 'питер'
+        ]
+
+    def is_ai_question(self, text: str) -> Tuple[bool, Dict]:
+        """Определяет, является ли запрос AI-вопросом и извлекает контекст"""
+        text_lower = text.lower().strip()
+
+        result = {
+            'is_ai': False,
+            'reason': '',
+            'location': None,
+            'is_question': '?' in text_lower or any(text_lower.startswith(w) for w in self.question_words),
+            'has_ai_keyword': False
+        }
+
+        # 1. Проверяем явные AI-триггеры (самый высокий приоритет)
+        for keyword in self.ai_keywords:
+            if keyword in text_lower:
+                result['is_ai'] = True
+                result['reason'] = f'AI keyword: {keyword}'
+                result['has_ai_keyword'] = True
+                break
+
+        # 2. Проверяем паттерны AI-вопросов
+        if not result['is_ai']:
+            if self._contains_any(text_lower, self.patterns['ai_question']):
+                result['is_ai'] = True
+                result['reason'] = 'AI pattern match'
+
+        # 3. Вопросительные слова в начале
+        if not result['is_ai']:
+            for question_word in self.question_words:
+                if text_lower.startswith(question_word):
+                    # Но не "что завтра" или "что сегодня" - это прогноз
+                    if not (question_word == 'что' and any(
+                            word in text_lower for word in ['завтра', 'сегодня', 'послезавтра'])):
+                        result['is_ai'] = True
+                        result['reason'] = f'Question word: {question_word}'
+                        break
+
+        # 4. Знак вопроса и не одно слово
+        if not result['is_ai'] and '?' in text_lower:
+            words = text_lower.split()
+            if len(words) > 1:
+                result['is_ai'] = True
+                result['reason'] = 'Question mark with multiple words'
+
+        # Извлекаем город для контекста
+        result['location'] = self._extract_location(text)
+
+        # 5. Специальный случай: город + длинный вопрос
+        if not result['is_ai'] and result['location']:
+            city_in_text = any(city in text_lower for city in self.known_cities)
+            if city_in_text and len(text_lower.split()) > 3:
+                # Проверяем, не просто ли это "Город завтра"
+                if not any(pattern in text_lower for pattern in [' завтра', ' сегодня', ' послезавтра']):
+                    result['is_ai'] = True
+                    result['reason'] = 'City with detailed question'
+
+        logger.info(f"AI анализ '{text}': {result}")
+        return result['is_ai'], result
+
+    def analyze_with_context(self, text: str, user_id: int, user_context: dict = None) -> Dict:
+        """Анализирует запрос с учетом контекста пользователя"""
+        base_result = self.analyze(text)
+
+        # Добавляем информацию о AI-вопросе
+        is_ai, ai_info = self.is_ai_question(text)
+        base_result.update({
+            'is_ai_question': is_ai,
+            'ai_reason': ai_info['reason'],
+            'has_ai_keyword': ai_info['has_ai_keyword']
+        })
+
+        # Добавляем контекст пользователя
+        if user_context:
+            base_result['has_context'] = True
+            base_result['context_location'] = user_context.get('last_region')
+            base_result['context_date'] = user_context.get('last_request_date')
+
+            # Если у пользователя есть контекст и это follow-up вопрос
+            if user_context.get('last_region') and self._is_followup_question(text):
+                base_result['is_followup'] = True
+                base_result['followup_context'] = user_context['last_region']
+
+        return base_result
+
+    def _is_followup_question(self, text: str) -> bool:
+        """Определяет, является ли вопрос follow-up"""
+        followup_keywords = [
+            'река', 'озеро', 'водоем', 'водохранилище', 'пруд', 'затон',
+            'насадк', 'приманк', 'наживк', 'прикормк',
+            'снаст', 'удочк', 'спининг', 'фидер', 'поплав',
+            'щук', 'окун', 'лещ', 'карп', 'плотв', 'карась', 'сом', 'судак',
+            'где ловить', 'место', 'совет', 'рекомендац', 'как ловить',
+            'время', 'час', 'утро', 'вечер', 'день', 'ночь',
+            'глубин', 'течени', 'берег', 'залив', 'плес'
+        ]
+
+        text_lower = text.lower()
+        return any(keyword in text_lower for keyword in followup_keywords)
 
     def analyze(self, text: str) -> Dict:
         """Анализирует запрос пользователя"""

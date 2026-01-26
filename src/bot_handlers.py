@@ -20,6 +20,7 @@ from .ai_chat_handler import handle_ai_chat
 from typing import Dict, Any
 from src.geoip import GeoIPService, logger
 from src.location_resolver import LocationResolver
+import logging
 
 
 class FishingForecastBot:
@@ -195,29 +196,104 @@ class FishingForecastBot:
         return any(keyword in text_lower for keyword in followup_keywords)
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Интеллектуальный обработчик сообщений"""
-        user = update.effective_user
-        user_id = user.id
+        """Обработка текстовых сообщений"""
         message_text = update.message.text.strip()
+        user_id = update.effective_user.id
 
-        print(f"📨 Сообщение от {user.id}: {message_text}")
+        logging.info(f"📨 Сообщение от {user_id}: {message_text}")
 
-        # Анализируем намерение пользователя
-        analysis = self.intent_analyzer.analyze(message_text)
+        # Получаем контекст пользователя
+        user_context = self.user_context.get(user_id, {})
 
-        # Обрабатываем в зависимости от намерения
-        if analysis['intent'] == 'weather':
-            await self._handle_weather_request(update, analysis)
+        # Анализируем запрос с помощью IntentAnalyzer
+        analysis = self.intent_analyzer.analyze_with_context(
+            message_text,
+            user_id,
+            user_context
+        )
 
-        elif analysis['intent'] == 'fishing_forecast':
-            await self._handle_fishing_request(update, analysis, message_text)
+        logging.info(f"📊 Анализ запроса: {analysis}")
 
-        elif analysis['intent'] == 'general_question':
-            await self._handle_general_question(update, message_text)
+        # 1. ВЫСШИЙ ПРИОРИТЕТ: AI-вопросы
+        if analysis.get('is_ai_question'):
+            logging.info(f"🤖 AI-вопрос: {analysis.get('ai_reason')}")
+            await self._handle_ai_chat(update, message_text, analysis)
+            return
 
-        else:
-            await update.message.reply_text(
-                "Не совсем понял ваш запрос. Вы можете спросить о погоде или прогнозе клева.")
+        # 2. Follow-up вопросы в контексте
+        if analysis.get('is_followup') and analysis.get('context_location'):
+            logging.info(f"🔄 Follow-up вопрос для {analysis.get('context_location')}")
+            await self._handle_followup_question(update, user_id, message_text)
+            return
+
+        # 3. Запрос прогноза клева или погоды
+        if analysis.get('location'):
+            location = analysis['location']
+            days = analysis.get('days', 1)
+
+            if analysis.get('intent') == 'fishing_forecast':
+                logging.info(f"🎣 Запрос прогноза клева для {location} ({days} дней)")
+                await self._handle_region_request(update, user_id, location)
+            else:
+                logging.info(f"🌤️ Запрос погоды для {location} ({days} дней)")
+                await self._handle_weather_request(update, analysis)
+            return
+
+        # 4. Если ничего не подошло
+        help_text = (
+            "🎣 Я помогу вам с рыбалкой!\n\n"
+            "**Можно:**\n"
+            "• Написать название города для прогноза клева\n"
+            "• Задать вопрос о рыбалке (например: *Как ловить щуку?*)\n"
+            "• Попросить совет (например: *Дай совет на что ловить в Лиде*)\n"
+            "• Уточнить предыдущий прогноз\n\n"
+            "**Примеры запросов к ИИ:**\n"
+            "• *Какую наживку использовать для леща?*\n"
+            "• *Какие снасти лучше для щуки?*\n"
+            "• *Дай совет по рыбалке в Минске*"
+        )
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+
+    async def _handle_ai_chat(self, update: Update, question: str, analysis: Dict):
+        """Обработка AI-вопросов"""
+        try:
+            # Отправляем сообщение "думаю"
+            thinking_msg = await update.message.reply_text("🤔 Думаю над ответом...")
+
+            # Формируем запрос с контекстом
+            location = analysis.get('location') or analysis.get('context_location')
+            if location:
+                enhanced_question = f"{question} [город: {location}]"
+            else:
+                enhanced_question = question
+
+            # Получаем ответ от ИИ
+            ai_response = await handle_ai_chat(enhanced_question)
+
+            # Удаляем сообщение "думаю"
+            await thinking_msg.delete()
+
+            # Отправляем ответ
+            await update.message.reply_text(ai_response)
+
+            # Сохраняем в историю
+            await self._save_to_history(
+                user_id=update.effective_user.id,
+                query=question,
+                intent='ai_chat',
+                response=ai_response[:500] if len(ai_response) > 500 else ai_response
+            )
+
+        except Exception as e:
+            logging.error(f"Ошибка ИИ-чата: {e}")
+            fallback_response = (
+                "🤖 К сожалению, не могу ответить прямо сейчас.\n\n"
+                "Вы можете:\n"
+                "• Запросить прогноз клева для города\n"
+                "• Попробовать задать вопрос позже\n"
+                "• Уточнить свой запрос"
+            )
+            await update.message.reply_text(fallback_response)
 
     async def _handle_weather_request(self, update: Update, analysis: Dict):
         user_id = update.effective_user.id
@@ -367,32 +443,56 @@ class FishingForecastBot:
             return "🌤️"
 
     def _is_ai_question(self, text: str) -> bool:
-        """Определяет, является ли сообщение вопросом для ИИ"""
-        logger.debug(f"Анализируем текст: {text}")
-        text_lower = text.lower()
+        """Определяет, является ли запрос вопросом для ИИ"""
+        text_lower = text.lower().strip()
 
-        # Если начинается с вопросительных слов И НЕ содержит указание на город
-        question_starters = {'какая', 'какой', 'какое', 'какие', 'как', 'что',
-                             'почему', 'зачем', 'когда', 'где', 'сколько'}
+        # 1. Явные запросы к ИИ (ВЫСШИЙ ПРИОРИТЕТ)
+        ai_triggers = [
+            "совет", "подскажи", "помоги", "расскажи", "объясни",
+            "что посоветуешь", "как лучше", "что лучше",
+            "на что ловить", "какую наживку", "какие снасти",
+            "техник", "способ", "метод", "рекомендац", "посоветуй",
+            "дай совет", "подскажите", "помогите"
+        ]
 
-        first_word = text_lower.split()[0] if text_lower.split() else ''
+        # Проверяем триггеры - если есть, сразу к ИИ
+        for trigger in ai_triggers:
+            if trigger in text_lower:
+                logging.info(f"🤖 AI-триггер найден: '{trigger}' в тексте '{text}'")
+                return True
 
-        # Если начинается с вопросительного слова И содержит "погод" или "клев"
-        # то это запрос погоды, а не ИИ-вопрос
-        if first_word in question_starters:
-            if 'погод' in text_lower or 'клев' in text_lower or 'рыб' in text_lower:
-                return False
+        # 2. Вопросительные слова в начале (даже без знака ?)
+        question_starts = ["как", "что", "почему", "где", "когда", "зачем", "какой", "какая"]
+        for start in question_starts:
+            if text_lower.startswith(start):
+                logging.info(f"🤖 Вопросительное слово в начале: '{start}'")
+                return True
+
+        # 3. Знак вопроса + не одно слово
+        if '?' in text and len(text_lower.split()) > 1:
+            logging.info(f"🤖 Знак вопроса в тексте")
             return True
 
-        # Обычные вопросы с "?"
-        if '?' in text_lower:
+        # 4. Запросы про конкретные элементы рыбалки
+        fishing_specific = ["наживк", "снаст", "приманк", "удил", "крючк", "леск", "катушк", "воблер", "блесн"]
+        if any(term in text_lower for term in fishing_specific):
+            logging.info(f"🤖 Специфичный рыболовный термин")
             return True
 
-        # Запросы советов
-        advice_words = {'совет', 'подскажи', 'помоги', 'расскажи', 'объясни', 'посоветуй'}
-        if any(word in text_lower for word in advice_words):
-            return True
+        # 5. Комбинация: содержит город И вопрос
+        known_cities = ["лида", "минск", "москва", "гомель", "брест", "витебск", "гродно"]
+        city_in_text = any(city in text_lower for city in known_cities)
 
+        if city_in_text:
+            # Если есть город И длинный текст (>3 слов) - вероятно, вопрос с контекстом
+            word_count = len(text_lower.split())
+            if word_count > 3:
+                # Проверяем, не просто ли это "Город завтра/сегодня"
+                if not (word_count == 2 and any(word in text_lower for word in ["завтра", "сегодня", "послезавтра"])):
+                    logging.info(f"🤖 Комбинация: город + длинный текст")
+                    return True
+
+        logging.info(f"❌ Не распознан как AI-вопрос: '{text}'")
         return False
 
     async def _handle_followup_question(self, update: Update, user_id: int, question: str):
