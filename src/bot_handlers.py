@@ -18,7 +18,7 @@ from .weather_intelligent_service import IntelligentWeatherService
 from .intelligent_fishing_forecaster import IntelligentFishingForecaster
 from .ai_chat_handler import handle_ai_chat
 from typing import Dict, Any
-from src.geoip import GeoIPService
+from src.geoip import GeoIPService, logger
 from src.location_resolver import LocationResolver
 
 
@@ -315,7 +315,7 @@ class FishingForecastBot:
 
         # Форматируем ответ
         response = f"🎣 *Прогноз клева для {location}*\n\n{forecast}"
-        await update.message.reply_text(response, parse_mode="Markdown")
+        await update.message.reply_text(response)
 
         # Сохраняем в историю
         await self._save_to_history(user_id, original_query, 'fishing_forecast', response)
@@ -368,6 +368,7 @@ class FishingForecastBot:
 
     def _is_ai_question(self, text: str) -> bool:
         """Определяет, является ли сообщение вопросом для ИИ"""
+        logger.debug(f"Анализируем текст: {text}")
         text_lower = text.lower()
 
         # Если начинается с вопросительных слов И НЕ содержит указание на город
