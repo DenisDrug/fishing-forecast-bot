@@ -13,23 +13,11 @@ class GeoIPService:
         self.user_country_cache = {}
 
     async def get_user_country(self, user_id: int, ip_address: str = None) -> str:
-        """Определяет страну пользователя"""
-        # Проверяем кэш
-        if user_id in self.user_country_cache:
-            return self.user_country_cache[user_id]
+        """Определяет страну пользователя - ПРИНУДИТЕЛЬНО СНГ"""
+        # ПРИНУДИТЕЛЬНО возвращаем Беларусь для всех русскоязычных
+        return 'BY'  # Или 'RU' в зависимости от целевой аудитории
 
-        # Если есть IP - определяем по нему
-        if ip_address:
-            country = await self._get_country_by_ip(ip_address)
-            if country:
-                self.user_country_cache[user_id] = country
-                return country
-
-        # По умолчанию для русскоязычных пользователей
-        default_country = 'BY'
-        self.user_country_cache[user_id] = default_country
-
-        return default_country
+        # Отключил сложную логику - просто возвращаем BY
 
     async def _get_country_by_ip(self, ip_address: str) -> Optional[str]:
         """Определяет страну по IP через ip-api.com"""

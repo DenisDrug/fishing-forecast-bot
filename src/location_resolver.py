@@ -13,34 +13,38 @@ class LocationResolver:
         self.geocoding_url = "http://api.openweathermap.org/geo/1.0/direct"
         self.geoip_service = GeoIPService()
 
-
     async def resolve_location_for_user(self, location_query: str, user_id: int) -> Optional[Dict]:
-        """Ищет локацию с учетом страны пользователя"""
-        # Получаем страну пользователя из GeoIP
-        user_country = await self.geoip_service.get_user_country(user_id)
-
-        # Очищаем запрос
+        """Ищет локацию с ПРИНУДИТЕЛЬНЫМ приоритетом СНГ"""
+        # ОЧИЩАЕМ запрос от всего лишнего
         clean_query = self._clean_location_query(location_query)
 
-        # Пробуем найти с приоритетом страны пользователя
-        result = await self.resolve_location(clean_query, user_country)
+        # Убираем цифры, слова "дня", "дней", "завтра" и т.д.
+        clean_query = re.sub(r'\d+\s*дн[еяй]?', '', clean_query, flags=re.IGNORECASE)
+        clean_query = re.sub(r'\s*(на|в|для|по|у|с|за|из|от|до)\s*$', '', clean_query, flags=re.IGNORECASE)
+        clean_query = clean_query.strip()
+
+        if not clean_query:
+            return None
+
+        logger.info(f"Поиск города: '{clean_query}' (оригинал: '{location_query}')")
+
+        # ПРИНУДИТЕЛЬНЫЙ порядок стран
+        priority_countries = ['BY', 'RU', 'UA', 'KZ', 'MD']  # Только СНГ!
+
+        for country in priority_countries:
+            result = await self.resolve_location(clean_query, country)
+            if result:
+                logger.info(f"✅ Найден в {country}: {result.get('local_name')}")
+                return result
+
+        # Если не нашли в СНГ - пробуем без страны, но логируем
+        logger.warning(f"Не найден в СНГ: '{clean_query}', пробую глобально")
+        result = await self.resolve_location(clean_query)
+
         if result:
-            logger.info(f"Найдено в стране пользователя ({user_country}): {result.get('local_name')}")
-            return result
+            logger.warning(f"⚠️  Найден глобально: {result.get('name')}, {result.get('country')}")
 
-        # Если не нашли, пробуем другие страны СНГ
-        cis_countries = ['BY', 'RU', 'UA', 'KZ', 'MD', 'LT', 'LV', 'EE']
-
-        for country in cis_countries:
-            if country != user_country:  # Пропускаем уже проверенную
-                result = await self.resolve_location(clean_query, country)
-                if result:
-                    logger.info(f"Найдено в соседней стране ({country}): {result.get('local_name')}")
-                    return result
-
-        # Пробуем без указания страны
-        logger.info(f"Пробуем глобальный поиск для: {clean_query}")
-        return await self.resolve_location(clean_query)
+        return result
 
     async def resolve_location(self, location_query: str, country_hint: str = None) -> Optional[Dict]:
         """Ищет локацию через OpenWeather Geocoding API"""

@@ -225,6 +225,8 @@ class FishingForecastBot:
         location = analysis.get('location')
         days = analysis.get('days', 1)
 
+        print(f"DEBUG: Извлечена локация: '{location}' из '{update.message.text}'")
+
         if not location:
             await update.message.reply_text("Для прогноза погоды укажите место...")
             return

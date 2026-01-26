@@ -82,67 +82,65 @@ class IntentAnalyzer:
         return False
 
     def _extract_location(self, text: str) -> Optional[str]:
-        """Извлекает название локации из текста"""
+        """Извлекает название локации из текста - ЖЕСТКАЯ ОЧИСТКА"""
+        # Убираем ВСЕ служебные слова
         text_lower = text.lower()
 
-        # Список слов, которые НЕ являются городами
-        NOT_LOCATIONS = {
-            'какая', 'какой', 'какое', 'какие', 'скажи', 'подскажи',
-            'покажи', 'расскажи', 'погода', 'погоду', 'погодка',
-            'будет', 'есть', 'узнать', 'уточнить', 'дай', 'дайте',
-            'хочу', 'нужно', 'надо', 'можно', 'посмотри', 'посмотреть',
-            'уже', 'еще', 'опять', 'снова', 'заново', 'пожалуйста'
+        # Слова которые нужно полностью удалить
+        remove_words = {
+            'какая', 'какой', 'какое', 'какие', 'скажи', 'подскажи', 'покажи',
+            'расскажи', 'погода', 'погоду', 'погодка', 'погодку', 'будет',
+            'есть', 'дай', 'дайте', 'хочу', 'нужно', 'надо', 'можно',
+            'посмотри', 'пожалуйста', 'а', 'и', 'или', 'но', 'что', 'как',
+            'где', 'когда', 'зачем', 'почему', 'сколько'
         }
 
-        # Паттерны для извлечения локации
-        patterns = [
-            # "в Лиде на 3 дня", "в Москве завтра"
-            r'в\s+([А-ЯЁ][а-яё\-]+\s*[А-ЯЁа-яё\-]*)\s*(?:на|завтра|сегодня|послезавтра|\d+)',
-            # "погода в Лиде"
-            r'(?:погод[ауе]|клев[ау]?|рыб[ауы])\s+в\s+([А-ЯЁ][а-яё\-]+\s*[А-ЯЁа-яё\-]*)',
-            # "для Лиды", "по Лиде"
-            r'(?:для|по)\s+([А-ЯЁ][а-яё\-]+\s*[А-ЯЁа-яё\-]*)',
-            # "Лида на 2 дня", "Москва завтра"
-            r'([А-ЯЁ][а-яё\-]+\s*[А-ЯЁа-яё\-]*)\s+(?:на|завтра|сегодня|послезавтра|\d+\s+дн)',
-        ]
+        # Слова которые могут быть в конце (на, в, для)
+        end_words = {'на', 'в', 'для', 'по', 'у', 'с', 'за', 'из', 'от', 'до'}
 
-        # Пробуем паттерны
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
-            if match:
-                location = match.group(1).strip()
-                # Проверяем что это не служебное слово
-                if location.lower() not in NOT_LOCATIONS:
-                    return location
-
-        # Если паттерны не сработали, ищем слова с заглавной буквы
+        # Разбиваем текст
         words = text.split()
+        result_words = []
 
-        for i, word in enumerate(words):
-            clean_word = word.strip(' ,.!?;:')
+        for word in words:
+            clean_word = word.strip(' ,.!?;:').lower()
 
-            # Пропускаем если это предлог
-            if i == 0 and clean_word.lower() in ['в', 'на', 'для', 'по', 'у', 'с']:
+            # Пропускаем служебные слова
+            if clean_word in remove_words:
                 continue
 
-            # Ищем слово с заглавной буквой
-            if clean_word and clean_word[0].isupper():
-                # Пропускаем служебные слова
-                if clean_word.lower() in NOT_LOCATIONS:
-                    continue
+            # Сохраняем оригинал (с заглавной)
+            result_words.append(word.strip(' ,.!?;:'))
 
-                # Пропускаем дни недели и временные слова
-                time_words = {
-                    'сегодня', 'завтра', 'послезавтра', 'понедельник', 'вторник',
-                    'среда', 'четверг', 'пятница', 'суббота', 'воскресенье',
-                    'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
-                    'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'
-                }
+        if not result_words:
+            return None
 
-                if clean_word.lower() in time_words:
-                    continue
+        # Объединяем
+        cleaned_text = ' '.join(result_words)
 
-                return clean_word
+        # Убираем "на", "в" и т.д. в конце
+        last_word = cleaned_text.split()[-1].lower() if cleaned_text.split() else ''
+        if last_word in end_words:
+            cleaned_text = ' '.join(cleaned_text.split()[:-1])
+
+        # Если осталось одно слово - проверяем что оно с заглавной
+        final_words = cleaned_text.split()
+        if len(final_words) == 1:
+            word = final_words[0]
+            if word and word[0].isupper():
+                return word
+
+        # Ищем паттерн "в [город]"
+        match = re.search(r'в\s+([А-ЯЁ][а-яё\-]+)', cleaned_text, re.IGNORECASE)
+        if match:
+            location = match.group(1)
+            if location.lower() not in remove_words:
+                return location
+
+        # Ищем просто слово с заглавной
+        for word in final_words:
+            if word and word[0].isupper():
+                return word
 
         return None
 
