@@ -2,12 +2,14 @@
 import re
 from typing import Dict, Tuple, Optional
 import logging
+from src.morph_analyzer import MorphAnalyzer
 
 logger = logging.getLogger(__name__)
 
 
 class IntentAnalyzer:
     def __init__(self):
+        self.morph = MorphAnalyzer()
         # Паттерны для определения намерений
         self.patterns = {
             'weather': [
@@ -82,11 +84,17 @@ class IntentAnalyzer:
         return False
 
     def _extract_location(self, text: str) -> Optional[str]:
-        """Извлекает название локации из текста - ЖЕСТКАЯ ОЧИСТКА"""
-        # Убираем ВСЕ служебные слова
-        text_lower = text.lower()
+        """Извлекает название локации из текста"""
+        # Инициализируем морфологический анализатор
+        try:
+            from src.morph_analyzer import MorphAnalyzer
+            morph = MorphAnalyzer()
+            use_morph = True
+        except ImportError:
+            use_morph = False
 
-        # Слова которые нужно полностью удалить
+        # Убираем служебные слова
+        text_lower = text.lower()
         remove_words = {
             'какая', 'какой', 'какое', 'какие', 'скажи', 'подскажи', 'покажи',
             'расскажи', 'погода', 'погоду', 'погодка', 'погодку', 'будет',
@@ -128,6 +136,9 @@ class IntentAnalyzer:
         if len(final_words) == 1:
             word = final_words[0]
             if word and word[0].isupper():
+                # Нормализуем падеж если есть морфология
+                if use_morph:
+                    return morph.to_nominative(word)
                 return word
 
         # Ищем паттерн "в [город]"
@@ -135,11 +146,21 @@ class IntentAnalyzer:
         if match:
             location = match.group(1)
             if location.lower() not in remove_words:
+                # Нормализуем падеж если есть морфология
+                if use_morph:
+                    return morph.to_nominative(location)
                 return location
 
         # Ищем просто слово с заглавной
         for word in final_words:
             if word and word[0].isupper():
+                # Пропускаем если это короткое слово или междометие
+                if len(word) <= 2 or word.lower() in ['ах', 'ох', 'эх', 'ух']:
+                    continue
+
+                # Нормализуем падеж если есть морфология
+                if use_morph:
+                    return morph.to_nominative(word)
                 return word
 
         return None
