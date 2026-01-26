@@ -15,37 +15,45 @@ class LocationResolver:
 
     async def resolve_location_for_user(self, location_query: str, user_id: int) -> Optional[Dict]:
         """Ищет локацию с ПРИНУДИТЕЛЬНЫМ приоритетом СНГ"""
-        # ОЧИЩАЕМ запрос от всего лишнего
+        # Очищаем запрос
         clean_query = self._clean_location_query(location_query)
 
-        # Убираем цифры, слова "дня", "дней", "завтра" и т.д.
-        clean_query = re.sub(r'\d+\s*дн[еяй]?', '', clean_query, flags=re.IGNORECASE)
-        clean_query = re.sub(r'\s*(на|в|для|по|у|с|за|из|от|до)\s*$', '', clean_query, flags=re.IGNORECASE)
-        clean_query = clean_query.strip()
+        # Простая очистка без re
+        words = clean_query.split()
+        cleaned_words = []
+
+        for word in words:
+            word_lower = word.lower()
+            # Убираем слова "дня", "дней", "день"
+            if any(day_word in word_lower for day_word in ['дн', 'ден']):
+                continue
+            # Убираем цифры
+            if word.isdigit():
+                continue
+            cleaned_words.append(word)
+
+        clean_query = ' '.join(cleaned_words).strip()
+
+        # Убираем предлоги в конце
+        end_prepositions = ['на', 'в', 'для', 'по', 'у', 'с']
+        words = clean_query.split()
+        if words and words[-1].lower() in end_prepositions:
+            clean_query = ' '.join(words[:-1])
 
         if not clean_query:
             return None
 
-        logger.info(f"Поиск города: '{clean_query}' (оригинал: '{location_query}')")
+        logger.info(f"Поиск города для пользователя {user_id}: '{clean_query}'")
 
-        # ПРИНУДИТЕЛЬНЫЙ порядок стран
-        priority_countries = ['BY', 'RU', 'UA', 'KZ', 'MD']  # Только СНГ!
+        # ТОЛЬКО страны СНГ
+        cis_countries = ['BY', 'RU', 'UA', 'KZ', 'MD']
 
-        for country in priority_countries:
+        for country in cis_countries:
             result = await self.resolve_location(clean_query, country)
             if result:
-                logger.info(f"✅ Найден в {country}: {result.get('local_name')}")
                 return result
 
-        # Если не нашли в СНГ - пробуем без страны, но логируем
-        logger.warning(f"Не найден в СНГ: '{clean_query}', пробую глобально")
-        result = await self.resolve_location(clean_query)
-
-        if result:
-            logger.warning(f"⚠️  Найден глобально: {result.get('name')}, {result.get('country')}")
-
-        return result
-
+        return await self.resolve_location(clean_query)
     async def resolve_location(self, location_query: str, country_hint: str = None) -> Optional[Dict]:
         """Ищет локацию через OpenWeather Geocoding API"""
         try:
