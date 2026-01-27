@@ -95,7 +95,7 @@ class FishingForecastBot:
 
         await update.message.reply_text(
             welcome_msg,
-            parse_mode='Markdown',
+           # parse_mode='Markdown',
             reply_markup=reply_markup
         )
 
@@ -128,7 +128,7 @@ class FishingForecastBot:
             f"*Удачной рыбалки и интересных диалогов!* 🎣"
         )
 
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+        await update.message.reply_text(help_text)
 
     async def history_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /history"""
@@ -139,7 +139,7 @@ class FishingForecastBot:
             await update.message.reply_text(
                 "📭 У вас еще нет истории запросов.\n"
                 "Напишите название региона, чтобы получить первый прогноз!",
-                parse_mode='Markdown'
+                #parse_mode='Markdown'
             )
             return
 
@@ -149,7 +149,7 @@ class FishingForecastBot:
             await update.message.reply_text(
                 "📭 У вас еще нет истории запросов.\n"
                 "Напишите название региона, чтобы получить первый прогноз!",
-                parse_mode='Markdown'
+                #parse_mode='Markdown'
             )
             return
 
@@ -178,7 +178,7 @@ class FishingForecastBot:
 
         history_text = "\n".join(lines)
 
-        await update.message.reply_text(history_text, parse_mode='Markdown')
+        await update.message.reply_text(history_text)
 
     def _is_followup_question(self, text: str) -> bool:
         """Определяет, является ли сообщение follow-up вопросом"""
@@ -252,7 +252,7 @@ class FishingForecastBot:
             "• *Какие снасти лучше для щуки?*\n"
             "• *Дай совет по рыбалке в Минске*"
         )
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+        await update.message.reply_text(help_text)
 
     async def _handle_ai_chat(self, update: Update, question: str, analysis: Dict):
         """Обработка AI-вопросов"""
@@ -327,7 +327,7 @@ class FishingForecastBot:
 
         # Форматируем ответ
         response = self._format_weather_response(weather_data)
-        await update.message.reply_text(response, parse_mode="Markdown")
+        await update.message.reply_text(response)
 
     async def _ask_for_clarification(self, update: Update, original_query: str,
                                      locations: list, days: int):
@@ -500,7 +500,7 @@ class FishingForecastBot:
         processing_msg = await update.message.reply_text(
             f"🤔 *Анализирую ваш вопрос...*\n\n"
             f"Учитываю контекст предыдущего прогноза для *{self.user_context[user_id]['last_region']}*",
-            parse_mode='Markdown'
+            #parse_mode='Markdown'
         )
 
         try:
@@ -513,7 +513,7 @@ class FishingForecastBot:
 
             await processing_msg.edit_text(
                 ai_response,
-                parse_mode='Markdown',
+                #parse_mode='Markdown',
                 disable_web_page_preview=True
             )
 
@@ -525,7 +525,7 @@ class FishingForecastBot:
             await processing_msg.edit_text(
                 f"❌ *Не удалось обработать вопрос*\n\n"
                 f"Попробуйте задать вопрос иначе или запросите новый прогноз.",
-                parse_mode='Markdown'
+                #parse_mode='Markdown'
             )
 
     async def _ask_ai_with_context(self, region: str, forecast_summary: str, question: str) -> str:
@@ -630,7 +630,7 @@ class FishingForecastBot:
             f"2️⃣ Анализирую с помощью ИИ...\n"
             f"3️⃣ Формирую прогноз клева...\n\n"
             f"*Это займет около 10-15 секунд*",
-            parse_mode='Markdown'
+            #parse_mode='Markdown'
         )
 
         try:
@@ -640,7 +640,7 @@ class FishingForecastBot:
                 f"✅ 1️⃣ Получаю данные погоды...\n"
                 f"2️⃣ Анализирую с помощью ИИ...\n"
                 f"3️⃣ Формирую прогноз клева...",
-                parse_mode='Markdown'
+                #parse_mode='Markdown'
             )
 
             weather_forecast = weather_service.get_forecast(region)
@@ -653,7 +653,7 @@ class FishingForecastBot:
                     f"• Проблемы с интернет-соединением\n"
                     f"• Ошибка сервиса погоды\n\n"
                     f"Попробуйте другой регион или повторите позже.",
-                    parse_mode='Markdown'
+                    #parse_mode='Markdown'
                 )
                 return
 
@@ -663,7 +663,7 @@ class FishingForecastBot:
                 f"✅ 1️⃣ Получаю данные погоды...\n"
                 f"✅ 2️⃣ Анализирую с помощью ИИ...\n"
                 f"3️⃣ Формирую прогноз клева...",
-                parse_mode='Markdown'
+                #parse_mode='Markdown'
             )
 
             forecast_result = ai_forecaster.get_forecast(region, weather_forecast['forecasts'])
@@ -711,7 +711,7 @@ class FishingForecastBot:
 
             await processing_msg.edit_text(
                 final_message,
-                parse_mode='Markdown',
+                #parse_mode='Markdown',
                 disable_web_page_preview=True
             )
 
@@ -724,7 +724,7 @@ class FishingForecastBot:
                 f"❌ *Произошла ошибка при обработке запроса*\n\n"
                 f"*Детали:* {str(e)[:100]}...\n\n"
                 f"Попробуйте еще раз или обратитесь к разработчику.",
-                parse_mode='Markdown'
+                #parse_mode='Markdown'
             )
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -789,7 +789,7 @@ class FishingForecastBot:
                     chat_id=update.effective_chat.id,
                     text="❌ *Произошла непредвиденная ошибка*\n\n"
                          "Попробуйте еще раз или обратитесь к разработчику.",
-                    parse_mode='Markdown'
+                    #parse_mode='Markdown'
                 )
         except:
             pass
