@@ -567,7 +567,7 @@ class FishingForecastBot:
 [Фишка или лайфхак от опытного рыбака]"""
 
             payload = {
-                "model": "llama-3.1-8b-instant",
+                "model": "openai/gpt-oss-120b",
                 "messages": [
                     {"role": "system", "content": prompt}
                 ],
