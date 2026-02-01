@@ -323,3 +323,40 @@ class IntentAnalyzer:
             result['period'] = f'{result["days"]}_days'
 
         return result
+
+
+def analyze_with_weather_context(self, text: str, last_weather_data: dict = None) -> dict:
+    """Анализирует запрос с учетом последних погодных данных"""
+    result = self.analyze(text)
+
+    if last_weather_data:
+        result['has_weather_context'] = True
+        result['weather_data'] = {
+            'location': last_weather_data.get('location'),
+            'temperature': last_weather_data.get('temp'),
+            'conditions': last_weather_data.get('conditions'),
+            'days': last_weather_data.get('days', 1)
+        }
+
+    # Определяем, нужна ли погода для ответа
+    result['needs_weather_data'] = self._needs_weather_for_response(text)
+
+    return result
+
+
+def _needs_weather_for_response(self, text: str) -> bool:
+    """Определяет, нужны ли погодные данные для ответа"""
+    text_lower = text.lower()
+
+    weather_dependent_phrases = [
+        'клев', 'клюет', 'ловится', 'прогноз.*рыб',
+        'на что ловить', 'какая рыба', 'совет.*погод',
+        'в такую погоду', 'при такой температуре',
+        'завтра.*рыба', 'сегодня.*рыба'
+    ]
+
+    for phrase in weather_dependent_phrases:
+        if re.search(phrase, text_lower):
+            return True
+
+    return False
