@@ -62,7 +62,7 @@ async def handle_ai_chat(question: str) -> str:
                 {"role": "user", "content": question}
             ],
             "temperature": 0.7,
-            "max_tokens": 500
+            "max_tokens": 1200
         }
 
         timeout = aiohttp.ClientTimeout(total=15)
