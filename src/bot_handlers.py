@@ -205,6 +205,7 @@ class FishingForecastBot:
         # Определяем тип запроса
         intent_analyzer = IntentAnalyzer()
         analysis = intent_analyzer.analyze(message_text)
+        text_lower = message_text.lower()
 
         # 1. Запросы "прогноз клева в [город]" или "[город]"
         if analysis.get('location') and analysis.get('intent') == 'fishing_forecast':
@@ -213,6 +214,23 @@ class FishingForecastBot:
 
             # ИНТЕГРИРОВАННЫЙ ПОДХОД: погода + ИИ
             await self._handle_integrated_fishing_forecast(update, location, days)
+            return
+
+        if any(word in text_lower for word in ['клев', 'клюет', 'ловится']):
+            # Извлекаем город
+            location = self._extract_city_from_query(message_text)
+
+            # Если город не найден, берем из контекста
+            if not location and user_id in self.user_context:
+                location = self.user_context[user_id].get('last_city', '')
+
+            if location:
+                # Проверяем "завтра"
+                is_tomorrow = 'завтра' in text_lower
+                await self._handle_integrated_fishing_forecast(update, location, is_tomorrow=is_tomorrow)
+            else:
+                await update.message.reply_text(
+                    "🎣 Укажите город для прогноза клева, например: 'Клев в Лиде' или 'Какой клев завтра в Минске'")
             return
 
         # 2. Вопросы о клеве/рыбалке (с контекстом погоды если есть)
@@ -352,75 +370,151 @@ class FishingForecastBot:
             logging.error(f"Ошибка AI с погодным контекстом: {e}")
             await update.message.reply_text("❌ Не удалось проанализировать с учетом погоды.")
 
-    async def _handle_integrated_fishing_forecast(self, update: Update, location: str, days: int = 1):
-        """Интегрированный прогноз клева: погода + ИИ-анализ"""
+    def _format_simple_weather_for_ai(self, weather_data: dict, is_tomorrow: bool = False) -> str:
+        """Краткая сводка погоды для ИИ"""
+        if not weather_data.get('forecast'):
+            return "Нет данных"
+
+        # Выбираем правильный день
+        day_index = 1 if is_tomorrow else 0
+
+        if day_index < len(weather_data['forecast']):
+            day = weather_data['forecast'][day_index]
+            return (
+                f"Дата: {day.get('date', '')}\n"
+                f"Погода: {day.get('weather', '')}\n"
+                f"Температура: {day.get('temp_min', '?')}...{day.get('temp_max', '?')}°C\n"
+                f"Ветер: {day.get('wind_speed', '?')} м/с\n"
+                f"Давление: {day.get('pressure', '?')} мм рт.ст."
+            )
+        else:
+            return "Нет данных на запрошенную дату"
+
+    def _parse_ai_fishing_response(self, ai_response: str, location: str, is_tomorrow: bool = False) -> str:
+        """Парсит ответ ИИ и форматирует в читаемый вид"""
+        try:
+            # Пытаемся извлечь JSON
+            import json
+            import re
+
+            # Ищем JSON в ответе
+            json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+            if json_match:
+                data = json.loads(json_match.group())
+            else:
+                # Если нет JSON, создаем fallback
+                data = {
+                    "overall_score": 5,
+                    "peaceful_score": 5,
+                    "predator_score": 5,
+                    "brief_comment": "Средний клев при текущих условиях."
+                }
+
+            # Форматируем звездочками
+            def score_to_stars(score):
+                full_stars = int(score / 2)  # 10 баллов = 5 звезд
+                return "⭐" * full_stars + "☆" * (5 - full_stars)
+
+            # Красивый формат
+            date_text = "ЗАВТРА" if is_tomorrow else "СЕГОДНЯ"
+
+            response = (
+                f"🎣 *ПРОГНОЗ КЛЕВА ДЛЯ {location.upper()} {date_text}*\n\n"
+                f"📊 *ОЦЕНКА КЛЕВА:*\n"
+                f"• Общий клев: {data.get('overall_score', 5)}/10 {score_to_stars(data.get('overall_score', 5))}\n"
+                f"• Мирная рыба: {data.get('peaceful_score', 5)}/10 {score_to_stars(data.get('peaceful_score', 5))}\n"
+                f"• Хищная рыба: {data.get('predator_score', 5)}/10 {score_to_stars(data.get('predator_score', 5))}\n\n"
+                f"💬 *КОММЕНТАРИЙ:*\n{data.get('brief_comment', '')}\n\n"
+                f"📍 *МЕСТО:* {location}\n"
+                f"📅 *ДАТА:* {date_text.lower()}\n"
+                f"🎯 *ТОЧНОСТЬ:* анализ на основе реальных погодных данных"
+            )
+
+            return response
+
+        except Exception as e:
+            logging.error(f"Ошибка парсинга ответа ИИ: {e}")
+            return f"🎣 *ПРОГНОЗ КЛЕВА ДЛЯ {location}*\n\n📊 К сожалению, не удалось получить оценку.\n\nПопробуйте запросить прогноз клева с указанием города."
+
+    async def _handle_integrated_fishing_forecast(self, update: Update, location: str, days: int = 1,
+                                                  is_tomorrow: bool = False):
+        """Интегрированный прогноз клева с упрощенным форматом"""
         user_id = update.effective_user.id
 
-        # Проверяем валидность города
-        if not location or len(location) < 2 or location.lower() in ['на', 'в']:
-            # Пытаемся получить город из контекста
-            user_id = update.effective_user.id
+        # ИСПРАВЛЕНИЕ: Если location = "завтра", берем из контекста
+        if location.lower() in ['завтра', 'сегодня', 'послезавтра']:
+            print(f"DEBUG: Получено временное указание '{location}', ищем город в контексте...")
             if user_id in self.user_context:
-                location = self.user_context[user_id].get('last_region', '')
+                location = self.user_context[user_id].get('last_city', '')
+                print(f"DEBUG: Взяли город из контекста: '{location}'")
 
-        if not location:
-            await update.message.reply_text("❌ Не указан город для анализа.")
-            return
+            if not location:
+                await update.message.reply_text("❌ Сначала укажите город, например: 'Прогноз клева в Ошмянах завтра'")
+                return
 
         await update.message.reply_text(f"🎣 Анализирую условия для рыбалки в {location}...")
 
         try:
-            # 1. Получаем погоду
-            weather_data = await self.weather_service.get_weather_forecast(location, days)
+            # Определяем дни для прогноза
+            forecast_days = 1
+            if location.lower() in ['завтра']:
+                forecast_days = 1  # Завтра = +1 день
+                is_tomorrow = True
+            elif 'дн' in location.lower():
+                # Извлекаем количество дней
+                import re
+                match = re.search(r'(\d+)\s+дн', location.lower())
+                if match:
+                    forecast_days = int(match.group(1))
+
+            # Получаем погоду
+            weather_data = await self.weather_service.get_weather_forecast(location, forecast_days)
 
             if not weather_data:
                 await update.message.reply_text(f"❌ Не удалось получить данные для '{location}'.")
                 return
 
-            # 2. Сохраняем в контекст
-            self.last_weather_data[user_id] = {
-                'location': location,
-                'temperature': weather_data.get('temp', {}),
-                'conditions': weather_data.get('conditions', ''),
-                'full_data': weather_data,
-                'timestamp': datetime.now()
-            }
-
-            # 3. Формируем запрос для ИИ с погодными данными
-            weather_summary = self._format_weather_for_ai(weather_data)
+            # Формируем УПРОЩЕННЫЙ промпт для ИИ
+            weather_summary = self._format_simple_weather_for_ai(weather_data, is_tomorrow)
 
             ai_prompt = f"""
-    Ты — эксперт-ихтиолог и рыболов. Проанализируй условия для рыбалки.
+    Ты — рыболовный эксперт. Проанализируй клев рыбы.
 
-    Место: {location}
-    Дата: {datetime.now().strftime('%d.%m.%Y')}
-    
-    Погодные условия на {days} дней:
+    МЕСТО: {location}
+    ДАТА: {'ЗАВТРА' if is_tomorrow else 'СЕГОДНЯ'}
+
+    ПОГОДНЫЕ УСЛОВИЯ:
     {weather_summary}
 
-    ВОПРОС: Дайте краткий прогноз клева рыбы на основе этих погодных условий.
+    ДАЙ ОЦЕНКУ КЛЕВА ОТ 1 ДО 10:
+    1. Общая оценка клева (1-10)
+    2. Оценка для мирной рыбы (1-10)
+    3. Оценка для хищной рыбы (1-10)
 
-    В ОТВЕТЕ УЧТИ:
-    1. Активность разных видов рыб (хищные/мирные)
-    2. Рекомендуемые снасти и наживки для текущих условий
-    3. Лучшее время суток для ловли
-    4. Особенности рыбалки по текущему сезону (лед, безопасность, открытая вода)
-    5. Конкретные рекомендации для региона {location}
+    ФОРМАТ ОТВЕТА ТОЛЬКО В JSON:
+    {{
+      "overall_score": X,
+      "peaceful_score": X, 
+      "predator_score": X,
+      "brief_comment": "короткий комментарий 10-15 слов"
+    }}
 
-    Отвечай коротко и по делу. Максимум 400 слов.
+    НИКАКИХ ТАБЛИЦ, СПИСКОВ, РЕКОМЕНДАЦИЙ!
     """
 
-            # 4. Получаем ответ от ИИ
+            # Получаем ответ от ИИ
             thinking_msg = await update.message.reply_text("🤔 Анализирую с помощью ИИ...")
             ai_response = await handle_ai_chat(ai_prompt)
             await thinking_msg.delete()
 
-            # 5. Форматируем итоговый ответ
-            final_response = self._format_integrated_response(location, weather_data, ai_response)
-            await update.message.reply_text(final_response)
+            # Парсим JSON ответ
+            forecast = self._parse_ai_fishing_response(ai_response, location, is_tomorrow)
+
+            # Отправляем УПРОЩЕННЫЙ ответ
+            await update.message.reply_text(forecast, parse_mode='Markdown')
 
         except Exception as e:
-            logging.error(f"Ошибка интегрированного прогноза: {e}")
+            logging.error(f"Ошибка прогноза клева: {e}")
             await update.message.reply_text("❌ Ошибка анализа. Попробуйте позже.")
 
     def _format_weather_for_ai(self, weather_data: dict) -> str:
@@ -496,6 +590,19 @@ class FishingForecastBot:
 
         # ВАЖНО: Сохраняем в ДВА места для разных нужд
         user_id = update.effective_user.id
+
+        # Сохраняем город и дату для контекста
+        if user_id not in self.user_context:
+            self.user_context[user_id] = {}
+
+        self.user_context[user_id].update({
+            'last_city': location,  # Сохраняем город
+            'last_city_date': datetime.now(),
+            'last_weather_days': days,
+            'last_weather_data': weather_data  # Сохраняем полные данные
+        })
+
+        print(f"DEBUG: Сохранен контекст для {user_id}: город={location}, дней={days}")
 
         # 1. В user_context для follow-up вопросов
         if user_id not in self.user_context:
