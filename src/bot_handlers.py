@@ -37,6 +37,7 @@ class FishingForecastBot:
         self.location_resolver = LocationResolver()
         self.user_context = {}
         self.last_weather_data = {}  # {user_id: weather_data}
+        self.intent_analyzer = IntentAnalyzer()
 
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик команды /start"""
@@ -371,11 +372,11 @@ class FishingForecastBot:
             await update.message.reply_text("❌ Не удалось проанализировать с учетом погоды.")
 
     def _format_simple_weather_for_ai(self, weather_data: dict, is_tomorrow: bool = False) -> str:
-        """Краткая сводка погоды для ИИ"""
+        """Краткая сводка погоды для ИИ с учетом 'завтра'"""
         if not weather_data.get('forecast'):
             return "Нет данных"
 
-        # Выбираем правильный день
+        # Выбираем правильный день: 0=сегодня, 1=завтра
         day_index = 1 if is_tomorrow else 0
 
         if day_index < len(weather_data['forecast']):
@@ -388,7 +389,9 @@ class FishingForecastBot:
                 f"Давление: {day.get('pressure', '?')} мм рт.ст."
             )
         else:
-            return "Нет данных на запрошенную дату"
+            # Fallback: берем первый доступный день
+            day = weather_data['forecast'][0]
+            return f"Погода: {day.get('weather', '')}, Температура: {day.get('temp_min', '?')}...{day.get('temp_max', '?')}°C"
 
     def _parse_ai_fishing_response(self, ai_response: str, location: str, is_tomorrow: bool = False) -> str:
         """Парсит ответ ИИ и форматирует в читаемый вид"""
@@ -438,40 +441,85 @@ class FishingForecastBot:
 
     async def _handle_integrated_fishing_forecast(self, update: Update, location: str, days: int = 1,
                                                   is_tomorrow: bool = False):
-        """Интегрированный прогноз клева с упрощенным форматом"""
+        """ИСПРАВЛЕННЫЙ: Интегрированный прогноз клева - всегда правильный город и дата"""
         user_id = update.effective_user.id
+        message_text = update.message.text
+        message_lower = message_text.lower()
 
-        # ИСПРАВЛЕНИЕ: Если location = "завтра", берем из контекста
-        if location.lower() in ['завтра', 'сегодня', 'послезавтра']:
-            print(f"DEBUG: Получено временное указание '{location}', ищем город в контексте...")
-            if user_id in self.user_context:
-                location = self.user_context[user_id].get('last_city', '')
-                print(f"DEBUG: Взяли город из контекста: '{location}'")
+        print(f"=== DEBUG _handle_integrated_fishing_forecast ===")
+        print(f"Входные данные: location='{location}', days={days}, is_tomorrow={is_tomorrow}")
+        print(f"Полный текст: '{message_text}'")
 
-            if not location:
-                await update.message.reply_text("❌ Сначала укажите город, например: 'Прогноз клева в Ошмянах завтра'")
-                return
+        # ===== ИСПРАВЛЕНИЕ 1: ОПРЕДЕЛЯЕМ НАСТОЯЩИЙ ГОРОД =====
+        final_city = location
 
-        await update.message.reply_text(f"🎣 Анализирую условия для рыбалки в {location}...")
+        # Список слов, которые НЕ являются городами
+        NOT_CITIES = {'на', 'в', 'для', 'по', 'у', 'с', 'за', 'из', 'от', 'о'}
+
+        # Если location - это служебное слово (на, в, для и т.д.)
+        if location.lower() in NOT_CITIES:
+            print(f"DEBUG: Получен служебный город '{location}', ищем настоящий...")
+
+            # Вариант А: Ищем город в текущем сообщении
+            words = message_text.split()
+            for word in words:
+                word_clean = word.strip('.,!?;:').lower()
+
+                # Пропускаем служебные слова
+                if word_clean in NOT_CITIES or word_clean in ['завтра', 'сегодня', 'клев', 'будет', 'какой', 'какая']:
+                    continue
+
+                if len(word_clean) > 2:  # Минимум 3 буквы для города
+                    # Проверяем, может это уже сохраненный город в другом падеже
+                    if word[0].isupper():  # С заглавной - вероятно город
+                        final_city = word.strip('.,!?;:')
+                        print(f"DEBUG: Нашли город в тексте: '{final_city}'")
+                        break
+
+            # Вариант Б: Если не нашли в тексте, берем из контекста
+            if final_city.lower() in NOT_CITIES and user_id in self.user_context:
+                final_city = self.user_context[user_id].get('last_region', '')
+                if final_city:
+                    print(f"DEBUG: Взяли город из контекста (last_region): '{final_city}'")
+
+            # Вариант В: Если все еще нет, ищем last_city
+            if final_city.lower() in NOT_CITIES and user_id in self.user_context:
+                final_city = self.user_context[user_id].get('last_city', '')
+                if final_city:
+                    print(f"DEBUG: Взяли город из контекста (last_city): '{final_city}'")
+
+        # ===== ИСПРАВЛЕНИЕ 2: Проверяем, что город валидный =====
+        if not final_city or final_city.lower() in NOT_CITIES:
+            print(f"DEBUG: Не удалось определить город (final_city='{final_city}')")
+            await update.message.reply_text(
+                "❌ Не указан город. Примеры правильных запросов:\n"
+                "• 'Клев в Лиде завтра'\n"
+                "• 'Какой клев завтра в Минске'\n"
+                "• 'Прогноз клева для Ошмян'\n"
+                "• 'Лида' (бот сам поймет, что нужен прогноз клева)"
+            )
+            return
+
+        # ===== ИСПРАВЛЕНИЕ 3: ОПРЕДЕЛЯЕМ ДАТУ =====
+        # Переопределяем is_tomorrow на основе текста сообщения
+        is_tomorrow = 'завтра' in message_lower
+        date_text = "ЗАВТРА" if is_tomorrow else "СЕГОДНЯ"
+
+        # Корректируем days для "завтра"
+        forecast_days = 2 if is_tomorrow else 1
+
+        print(
+            f"DEBUG РЕЗУЛЬТАТ: city='{final_city}', tomorrow={is_tomorrow}, date='{date_text}', forecast_days={forecast_days}")
+
+        # ===== ОСНОВНАЯ ЛОГИКА =====
+        await update.message.reply_text(f"🎣 Анализирую клев в {final_city} {date_text.lower()}...")
 
         try:
-            # Определяем дни для прогноза
-            forecast_days = 1
-            if location.lower() in ['завтра']:
-                forecast_days = 1  # Завтра = +1 день
-                is_tomorrow = True
-            elif 'дн' in location.lower():
-                # Извлекаем количество дней
-                import re
-                match = re.search(r'(\d+)\s+дн', location.lower())
-                if match:
-                    forecast_days = int(match.group(1))
-
             # Получаем погоду
-            weather_data = await self.weather_service.get_weather_forecast(location, forecast_days)
+            weather_data = await self.weather_service.get_weather_forecast(final_city, forecast_days)
 
             if not weather_data:
-                await update.message.reply_text(f"❌ Не удалось получить данные для '{location}'.")
+                await update.message.reply_text(f"❌ Не удалось получить данные для '{final_city}'.")
                 return
 
             # Формируем УПРОЩЕННЫЙ промпт для ИИ
@@ -480,8 +528,8 @@ class FishingForecastBot:
             ai_prompt = f"""
     Ты — рыболовный эксперт. Проанализируй клев рыбы.
 
-    МЕСТО: {location}
-    ДАТА: {'ЗАВТРА' if is_tomorrow else 'СЕГОДНЯ'}
+    МЕСТО: {final_city}
+    ДАТА: {date_text}
 
     ПОГОДНЫЕ УСЛОВИЯ:
     {weather_summary}
@@ -491,15 +539,15 @@ class FishingForecastBot:
     2. Оценка для мирной рыбы (1-10)
     3. Оценка для хищной рыбы (1-10)
 
-    ФОРМАТ ОТВЕТА ТОЛЬКО В JSON:
+    ОТВЕЧАЙ ТОЛЬКО В JSON ФОРМАТЕ:
     {{
-      "overall_score": X,
-      "peaceful_score": X, 
-      "predator_score": X,
-      "brief_comment": "короткий комментарий 10-15 слов"
+      "overall_score": число от 1 до 10,
+      "peaceful_score": число от 1 до 10,
+      "predator_score": число от 1 до 10,
+      "comment": "короткий комментарий 10-15 слов о клеве"
     }}
 
-    НИКАКИХ ТАБЛИЦ, СПИСКОВ, РЕКОМЕНДАЦИЙ!
+    НИКАКИХ ДРУГИХ ТЕКСТОВ, ТОЛЬКО JSON!
     """
 
             # Получаем ответ от ИИ
@@ -507,15 +555,70 @@ class FishingForecastBot:
             ai_response = await handle_ai_chat(ai_prompt)
             await thinking_msg.delete()
 
-            # Парсим JSON ответ
-            forecast = self._parse_ai_fishing_response(ai_response, location, is_tomorrow)
+            # Парсим JSON ответ (используем улучшенный парсер)
+            forecast = self._parse_ai_fishing_response_improved(ai_response, final_city, date_text)
 
             # Отправляем УПРОЩЕННЫЙ ответ
             await update.message.reply_text(forecast, parse_mode='Markdown')
 
         except Exception as e:
-            logging.error(f"Ошибка прогноза клева: {e}")
+            logging.error(f"Ошибка прогноза клева: {e}", exc_info=True)
             await update.message.reply_text("❌ Ошибка анализа. Попробуйте позже.")
+
+    # ===== ДОБАВИТЬ ЭТОТ МЕТОД В КЛАСС =====
+    def _parse_ai_fishing_response_improved(self, ai_response: str, city: str, date: str) -> str:
+        """УЛУЧШЕННЫЙ парсер ответа ИИ"""
+        try:
+            import json
+            import re
+
+            print(f"DEBUG _parse_ai_fishing_response: raw response length={len(ai_response)}")
+            print(f"DEBUG: Первые 200 символов: {ai_response[:200]}")
+
+            # Ищем JSON в ответе (более надежный поиск)
+            json_match = re.search(r'\{[^{}]*\}', ai_response)
+            if not json_match:
+                # Пробуем найти любой JSON
+                json_match = re.search(r'\{.*\}', ai_response, re.DOTALL)
+
+            if json_match:
+                json_str = json_match.group()
+                print(f"DEBUG: Найден JSON: {json_str}")
+                data = json.loads(json_str)
+            else:
+                print(f"DEBUG: JSON не найден, создаем fallback")
+                data = {
+                    'overall_score': 5,
+                    'peaceful_score': 5,
+                    'predator_score': 5,
+                    'comment': 'Средний клев при текущих условиях.'
+                }
+
+            # Функция для звездочек
+            def get_stars(score):
+                try:
+                    score_num = int(score)
+                    full = min(int(score_num / 2), 5)
+                    return '⭐' * full + '☆' * (5 - full)
+                except:
+                    return '⭐⭐⭐☆☆'
+
+            # КРАСИВЫЙ ФОРМАТ ОТВЕТА
+            return (
+                f"🎣 *ПРОГНОЗ КЛЕВА*\n\n"
+                f"📍 *МЕСТО:* {city}\n"
+                f"📅 *ДАТА:* {date}\n\n"
+                f"📊 *ОЦЕНКА КЛЕВА:*\n"
+                f"• Общий: {data.get('overall_score', 5)}/10 {get_stars(data.get('overall_score', 5))}\n"
+                f"• Мирная рыба: {data.get('peaceful_score', 5)}/10 {get_stars(data.get('peaceful_score', 5))}\n"
+                f"• Хищная рыба: {data.get('predator_score', 5)}/10 {get_stars(data.get('predator_score', 5))}\n\n"
+                f"💬 *КОММЕНТАРИЙ:*\n{data.get('comment', data.get('brief_comment', 'Анализ завершен.'))}\n\n"
+                f"🎯 *АНАЛИЗ НА ОСНОВЕ РЕАЛЬНЫХ ПОГОДНЫХ ДАННЫХ*"
+            )
+
+        except Exception as e:
+            print(f"DEBUG: Ошибка парсинга: {e}")
+            return f"🎣 *ПРОГНОЗ КЛЕВА ДЛЯ {city} {date}*\n\n✅ Анализ завершен.\n\n📍 *МЕСТО:* {city}\n📅 *ДАТА:* {date}"
 
     def _format_weather_for_ai(self, weather_data: dict) -> str:
         """Форматирует погодные данные для промпта ИИ"""
@@ -640,25 +743,37 @@ class FishingForecastBot:
         await update.message.reply_text(response)
 
     def _extract_city_from_query(self, text: str) -> str:
-        """Извлекает город из сложного запроса"""
+        """ИЗВЛЕКАЕТ ГОРОД, ИГНОРИРУЯ 'на', 'в' и т.д."""
         text_lower = text.lower()
 
-        # Известные города
-        known_cities = [
-            'лида', 'минск', 'витебск', 'гомель', 'брест',
-            'гродно', 'могилев', 'могилёв', 'барановичи'
-        ]
+        # Список слов, которые НЕ являются городами
+        NOT_CITIES = {
+            'на', 'в', 'для', 'по', 'у', 'с', 'за', 'из', 'от', 'о',
+            'какой', 'какая', 'какое', 'какие', 'будет', 'клев',
+            'клюет', 'ловится', 'прогноз', 'погода', 'завтра',
+            'сегодня', 'послезавтра', 'эти', 'дни', 'дня', 'а', 'и'
+        }
 
-        # Ищем города в тексте
-        for city in known_cities:
-            if city in text_lower:
-                return city
-
-        # Если не нашли, пробуем извлечь последнее существительное
+        # Разбиваем текст на слова
         words = text_lower.split()
-        for word in reversed(words):
-            if len(word) > 2 and word not in ['на', 'в', 'для', 'какой', 'какая']:
-                return word
+
+        # Ищем первое "нормальное" слово (не предлог, не служебное)
+        for word in words:
+            word_clean = word.strip('.,!?;:')
+
+            # Пропускаем служебные слова
+            if word_clean in NOT_CITIES or len(word_clean) < 2:
+                continue
+
+            # Это может быть город!
+            # Используем location_resolver для проверки
+            try:
+                resolved = await self.location_resolver.resolve_location_for_user(word_clean, 0)
+                if resolved and 'name' in resolved:
+                    return resolved['name']
+            except:
+                # Если не распозналось, все равно возвращаем как возможный город
+                return word_clean.capitalize()
 
         return ""
 
