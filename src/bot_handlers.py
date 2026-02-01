@@ -356,6 +356,17 @@ class FishingForecastBot:
         """Интегрированный прогноз клева: погода + ИИ-анализ"""
         user_id = update.effective_user.id
 
+        # Проверяем валидность города
+        if not location or len(location) < 2 or location.lower() in ['на', 'в']:
+            # Пытаемся получить город из контекста
+            user_id = update.effective_user.id
+            if user_id in self.user_context:
+                location = self.user_context[user_id].get('last_region', '')
+
+        if not location:
+            await update.message.reply_text("❌ Не указан город для анализа.")
+            return
+
         await update.message.reply_text(f"🎣 Анализирую условия для рыбалки в {location}...")
 
         try:
@@ -452,8 +463,17 @@ class FishingForecastBot:
 
         print(f"DEBUG: Извлечена локация: '{location}' из '{update.message.text}'")
 
-        if not location:
-            await update.message.reply_text("Для прогноза погоды укажите место...")
+        # СПЕЦИАЛЬНАЯ ПРОВЕРКА: исправляем неправильно извлеченные города
+        invalid_words = ['на', 'в', 'для', 'по', 'у', 'с', 'за', 'какой', 'какая', 'эти', 'дни']
+
+        if location and location.lower() in invalid_words:
+            # Пытаемся извлечь город из исходного текста другим способом
+            original_text = update.message.text.lower()
+            location = self._extract_city_from_query(original_text)
+
+        if not location or len(location) < 2:  # Минимум 2 буквы для города
+            await update.message.reply_text(
+                "❌ Не удалось определить город. Укажите название явно, например: 'Лида' или 'Погода в Лиде'")
             return
 
         await update.message.reply_text(f"🌤️ Ищу '{location}'...")
@@ -474,9 +494,29 @@ class FishingForecastBot:
             await update.message.reply_text(f"❌ Не удалось получить прогноз...")
             return
 
-        if weather_data:
-            # Сохраняем погодные данные для этого пользователя
-            user_id = update.effective_user.id
+        # ВАЖНО: Сохраняем в ДВА места для разных нужд
+        user_id = update.effective_user.id
+
+        # 1. В user_context для follow-up вопросов
+        if user_id not in self.user_context:
+            self.user_context[user_id] = {}
+
+        self.user_context[user_id].update({
+            'last_region': location,
+            'last_request_date': datetime.now(),
+            'last_weather_data': {
+                'location': location,
+                'temperature': weather_data.get('temp'),
+                'conditions': weather_data.get('conditions'),
+                'pressure': weather_data.get('pressure'),
+                'wind': weather_data.get('wind_speed'),
+                'humidity': weather_data.get('humidity'),
+                'forecast_days': days
+            }
+        })
+
+        # 2. В last_weather_data для быстрого доступа (если у вас есть этот атрибут)
+        if hasattr(self, 'last_weather_data'):
             self.last_weather_data[user_id] = {
                 'location': location,
                 'temperature': weather_data.get('temp'),
@@ -491,6 +531,29 @@ class FishingForecastBot:
         # Форматируем ответ
         response = self._format_weather_response(weather_data)
         await update.message.reply_text(response)
+
+    def _extract_city_from_query(self, text: str) -> str:
+        """Извлекает город из сложного запроса"""
+        text_lower = text.lower()
+
+        # Известные города
+        known_cities = [
+            'лида', 'минск', 'витебск', 'гомель', 'брест',
+            'гродно', 'могилев', 'могилёв', 'барановичи'
+        ]
+
+        # Ищем города в тексте
+        for city in known_cities:
+            if city in text_lower:
+                return city
+
+        # Если не нашли, пробуем извлечь последнее существительное
+        words = text_lower.split()
+        for word in reversed(words):
+            if len(word) > 2 and word not in ['на', 'в', 'для', 'какой', 'какая']:
+                return word
+
+        return ""
 
     async def _ask_for_clarification(self, update: Update, original_query: str,
                                      locations: list, days: int):

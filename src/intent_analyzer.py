@@ -214,6 +214,15 @@ class IntentAnalyzer:
 
     def _extract_location(self, text: str) -> Optional[str]:
         """Извлекает название локации из текста"""
+        # Сначала удаляем общие фразы, которые мешают
+        remove_phrases = [
+            'на эти дни', 'в эти дни', 'на днях',
+            'будет в', 'какой в', 'какая в'
+        ]
+
+        clean_text = text.lower()
+        for phrase in remove_phrases:
+            clean_text = clean_text.replace(phrase, ' ')
         # Инициализируем морфологический анализатор
         try:
             from src.morph_analyzer import MorphAnalyzer
