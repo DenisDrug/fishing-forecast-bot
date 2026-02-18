@@ -105,7 +105,7 @@ class AIForecaster:
             weather_info.append(
                 f"День {i} ({date}):\n"
                 f"- Температура: {day['temperature']:.1f}°C (ощущается как {day['feels_like']:.1f}°C)\n"
-                f"- Давление: {day['pressure']} гПа\n"
+                f"- Давление: {day['pressure']} мм рт.ст.\n"
                 f"- Влажность: {day['humidity']}%\n"
                 f"- Ветер: {day['wind_speed']:.1f} м/с, направление: {day['wind_direction']}°\n"
                 f"- Облачность: {day['cloudiness']}%\n"
@@ -217,11 +217,11 @@ class AIForecaster:
         for day in weather_data:
             score = 3.0
 
-            if 1013 <= day['pressure'] <= 1017:
+            if 759 <= day['pressure'] <= 763:
                 score += 0.5
-            elif day['pressure'] < 1000:
+            elif day['pressure'] < 750:
                 score -= 1.0
-            elif day['pressure'] > 1020:
+            elif day['pressure'] > 766:
                 score -= 0.5
 
             if 15 <= day['temperature'] <= 25:
@@ -265,7 +265,7 @@ class AIForecaster:
             date = datetime.fromisoformat(day['date']).strftime('%d.%m')
             response_lines.append(
                 f"{i}. {date}: {score:.1f}/5 - "
-                f"Темп: {day['temperature']:.1f}°C, Давление: {day['pressure']} гПа"
+                f"Темп: {day['temperature']:.1f}°C, Давление: {day['pressure']} мм рт.ст."
             )
 
         response_lines.extend([

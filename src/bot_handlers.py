@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import traceback
 import requests
 
-from .ai_chat_handler import handle_ai_chat
+from .ai_chat_handler import handle_ai_chat, handle_ai_json_chat
 from .config import config
 from .database import db
 from .weather_service import weather_service
@@ -16,7 +16,6 @@ from .ai_forecaster import ai_forecaster
 from .intent_analyzer import IntentAnalyzer
 from .weather_intelligent_service import IntelligentWeatherService
 from .intelligent_fishing_forecaster import IntelligentFishingForecaster
-from .ai_chat_handler import handle_ai_chat
 from typing import Dict, Any
 from src.geoip import GeoIPService, logger
 from src.location_resolver import LocationResolver
@@ -552,7 +551,7 @@ class FishingForecastBot:
 
             # Получаем ответ от ИИ
             thinking_msg = await update.message.reply_text("🤔 Анализирую с помощью ИИ...")
-            ai_response = await handle_ai_chat(ai_prompt)
+            ai_response = await handle_ai_json_chat(ai_prompt)
             await thinking_msg.delete()
 
             # Парсим JSON ответ (используем улучшенный парсер)
@@ -742,7 +741,7 @@ class FishingForecastBot:
         response = self._format_weather_response(weather_data)
         await update.message.reply_text(response)
 
-    def _extract_city_from_query(self, text: str) -> str:
+    async def _extract_city_from_query(self, text: str) -> str:
         """ИЗВЛЕКАЕТ ГОРОД, ИГНОРИРУЯ 'на', 'в' и т.д."""
         text_lower = text.lower()
 

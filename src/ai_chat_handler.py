@@ -85,6 +85,55 @@ async def handle_ai_chat(question: str) -> str:
         logger.error(f"AI chat error: {e}")
         return "Произошла ошибка при обработке вопроса."
 
+
+async def handle_ai_json_chat(prompt: str) -> str:
+    """
+    Обрабатывает запросы, где нужен строго JSON-ответ
+    """
+    if not config.GROQ_API_KEY:
+        return '{"overall_score":5,"peaceful_score":5,"predator_score":5,"comment":"ИИ недоступен, средний клев."}'
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {config.GROQ_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        system_prompt = (
+            "Ты — эксперт-рыболов. Отвечай строго валидным JSON без лишнего текста, "
+            "без пояснений и без форматирования."
+        )
+
+        payload = {
+            "model": "openai/gpt-oss-120b",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 400
+        }
+
+        timeout = aiohttp.ClientTimeout(total=15)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers=headers,
+                    json=payload
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    answer = data["choices"][0]["message"]["content"].strip()
+                    return answer
+
+                logger.error(f"Groq API error: {response.status}")
+                return '{"overall_score":5,"peaceful_score":5,"predator_score":5,"comment":"Ответ недоступен."}'
+
+    except Exception as e:
+        logger.error(f"AI JSON chat error: {e}")
+        return '{"overall_score":5,"peaceful_score":5,"predator_score":5,"comment":"Ошибка обработки ответа."}'
+
 def get_current_season() -> str:
     """Определяет текущий сезон"""
     from datetime import datetime

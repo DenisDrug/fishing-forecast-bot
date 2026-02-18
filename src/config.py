@@ -46,6 +46,10 @@ class Config:
             missing.append('GROQ_API_KEY')
         if not cls.DB_NAME:
             missing.append('DB_NAME')
+        if not cls.DB_USER:
+            missing.append('DB_USER')
+        if not cls.DB_PASSWORD:
+            missing.append('DB_PASSWORD')
 
         if missing:
             raise ValueError(f"Отсутствуют обязательные переменные окружения: {', '.join(missing)}")
