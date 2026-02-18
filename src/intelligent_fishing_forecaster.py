@@ -1,6 +1,8 @@
 # src/intelligent_fishing_forecaster.py
 import aiohttp
 import logging
+import math
+from datetime import datetime
 from typing import Dict, Optional
 from src.config import config
 
@@ -64,6 +66,7 @@ class IntelligentFishingForecaster:
         """
 
         for day in weather_data.get('forecast', []):
+            moon_info = self._get_moon_phase_info(day.get('date'))
             prompt += f"""
         Дата: {day.get('date', 'N/A')}
         Температура: {day.get('temp_min')}°C...{day.get('temp_max')}°C
@@ -73,6 +76,7 @@ class IntelligentFishingForecaster:
         Погода: {day.get('weather')}
         Облачность: {day.get('clouds')}%
         Осадки: {day.get('precipitation', 0)} мм
+        Луна: {moon_info}
         """
 
         prompt += """
@@ -88,7 +92,7 @@ class IntelligentFishingForecaster:
         Учитывай:
         - Стабильность атмосферного давления
         - Температуру воды (примерно на 2-3°C ниже температуры воздуха)
-        - Фазы луны (если знаешь дату)
+        - Фазу луны и освещенность
         - Сезонные особенности
         - Влияние ветра и осадков
 
@@ -96,6 +100,48 @@ class IntelligentFishingForecaster:
         """
 
         return prompt
+
+    def _get_moon_phase_info(self, date_str: str) -> str:
+        """Возвращает фазу луны и освещенность для даты"""
+        if not date_str:
+            return "неизвестно"
+
+        try:
+            date = datetime.fromisoformat(date_str).date()
+        except ValueError:
+            try:
+                date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except Exception:
+                return "неизвестно"
+
+        known_new_moon = datetime(2000, 1, 6).date()
+        days_since = (date - known_new_moon).days
+        synodic_month = 29.53058867
+        phase = days_since % synodic_month
+
+        if phase < 1.84566:
+            phase_name = "Новолуние"
+        elif phase < 5.53699:
+            phase_name = "Растущий серп"
+        elif phase < 9.22831:
+            phase_name = "Первая четверть"
+        elif phase < 12.91963:
+            phase_name = "Растущая луна"
+        elif phase < 16.61096:
+            phase_name = "Полнолуние"
+        elif phase < 20.30228:
+            phase_name = "Убывающая луна"
+        elif phase < 23.99361:
+            phase_name = "Последняя четверть"
+        elif phase < 27.68493:
+            phase_name = "Стареющий серп"
+        else:
+            phase_name = "Новолуние"
+
+        illumination = (1 - math.cos(2 * math.pi * phase / synodic_month)) / 2
+        illumination_percent = int(round(illumination * 100))
+
+        return f"{phase_name}, освещенность {illumination_percent}%"
 
     def _get_system_prompt(self) -> str:
         """Возвращает системный промпт для ИИ"""

@@ -4,6 +4,7 @@ from telegram.ext import (
     ContextTypes, filters, CallbackQueryHandler
 )
 from datetime import datetime, timedelta
+import re
 import traceback
 import requests
 
@@ -207,58 +208,22 @@ class FishingForecastBot:
         analysis = intent_analyzer.analyze(message_text)
         text_lower = message_text.lower()
 
-        # 1. Запросы "прогноз клева в [город]" или "[город]"
-        if analysis.get('location') and analysis.get('intent') == 'fishing_forecast':
-            location = analysis['location']
-            days = analysis.get('days', 1)
-
-            # ИНТЕГРИРОВАННЫЙ ПОДХОД: погода + ИИ
-            await self._handle_integrated_fishing_forecast(update, location, days)
-            return
-
-        if any(word in text_lower for word in ['клев', 'клюет', 'ловится']):
-            # Извлекаем город
-            location = self._extract_city_from_query(message_text)
-
-            # Если город не найден, берем из контекста
-            if not location and user_id in self.user_context:
-                location = self.user_context[user_id].get('last_city', '')
-
-            if location:
-                # Проверяем "завтра"
-                is_tomorrow = 'завтра' in text_lower
-                await self._handle_integrated_fishing_forecast(update, location, is_tomorrow=is_tomorrow)
-            else:
-                await update.message.reply_text(
-                    "🎣 Укажите город для прогноза клева, например: 'Клев в Лиде' или 'Какой клев завтра в Минске'")
-            return
-
-        # 2. Вопросы о клеве/рыбалке (с контекстом погоды если есть)
+        # 1. Прогноз клева
         if analysis.get('intent') == 'fishing_forecast':
-            last_weather = self.last_weather_data.get(user_id)
-
-            if last_weather:
-                # Есть контекст погоды - используем его
-                await self._handle_ai_chat_with_weather_context(update, message_text, last_weather)
-            else:
-                # Нет контекста - просим указать город
-                await update.message.reply_text(
-                    "🎣 Для прогноза клева нужно знать место. "
-                    f"Напишите название города, например: 'Москва' или 'Прогноз клева в Витебске'"
-                )
+            await self._handle_fishing_request(update, analysis, message_text)
             return
 
-        # 3. Просто погода
+        # 2. Погода
         if analysis.get('location') and analysis.get('intent') == 'weather':
             await self._handle_weather_request(update, analysis)
             return
 
-        # 4. Общие вопросы к ИИ
+        # 3. Общие вопросы к ИИ
         if '?' in message_text.lower() or analysis.get('intent') == 'general_question':
             await self._handle_ai_chat(update, message_text, analysis)
             return
 
-        # 5. Непонятно
+        # 4. Непонятно
         help_text = "🎣 Напишите название города для прогноза или задайте вопрос о рыбалке."
         await update.message.reply_text(help_text)
 
@@ -656,6 +621,8 @@ class FishingForecastBot:
         message_text = update.message.text
         location = analysis.get('location')
         days = analysis.get('days', 1)
+        time_period = analysis.get('time_period')
+        start_offset = self._get_time_period_offset(time_period)
 
         print(f"DEBUG: Извлечена локация: '{location}' из '{update.message.text}'")
 
@@ -682,60 +649,23 @@ class FishingForecastBot:
             return
 
         # Получаем погоду по координатам
+        requested_days = max(days + start_offset, 1)
         weather_data = await self.weather_service.get_weather_forecast_by_coords(
-            resolved['lat'], resolved['lon'], days
+            resolved['lat'], resolved['lon'], requested_days
         )
 
         if not weather_data:
             await update.message.reply_text(f"❌ Не удалось получить прогноз...")
             return
 
-        # ВАЖНО: Сохраняем в ДВА места для разных нужд
-        user_id = update.effective_user.id
+        full_weather_data = weather_data
+        weather_data = self._slice_weather_forecast(full_weather_data, start_offset, days)
 
-        # Сохраняем город и дату для контекста
-        if user_id not in self.user_context:
-            self.user_context[user_id] = {}
+        if not weather_data or not weather_data.get('forecast'):
+            await update.message.reply_text(f"❌ Не удалось подобрать прогноз по дате.")
+            return
 
-        self.user_context[user_id].update({
-            'last_city': location,  # Сохраняем город
-            'last_city_date': datetime.now(),
-            'last_weather_days': days,
-            'last_weather_data': weather_data  # Сохраняем полные данные
-        })
-
-        print(f"DEBUG: Сохранен контекст для {user_id}: город={location}, дней={days}")
-
-        # 1. В user_context для follow-up вопросов
-        if user_id not in self.user_context:
-            self.user_context[user_id] = {}
-
-        self.user_context[user_id].update({
-            'last_region': location,
-            'last_request_date': datetime.now(),
-            'last_weather_data': {
-                'location': location,
-                'temperature': weather_data.get('temp'),
-                'conditions': weather_data.get('conditions'),
-                'pressure': weather_data.get('pressure'),
-                'wind': weather_data.get('wind_speed'),
-                'humidity': weather_data.get('humidity'),
-                'forecast_days': days
-            }
-        })
-
-        # 2. В last_weather_data для быстрого доступа (если у вас есть этот атрибут)
-        if hasattr(self, 'last_weather_data'):
-            self.last_weather_data[user_id] = {
-                'location': location,
-                'temperature': weather_data.get('temp'),
-                'conditions': weather_data.get('conditions'),
-                'pressure': weather_data.get('pressure'),
-                'wind': weather_data.get('wind_speed'),
-                'humidity': weather_data.get('humidity'),
-                'forecast_days': days,
-                'timestamp': datetime.now()
-            }
+        self._store_weather_context(user_id, location, weather_data, full_weather_data)
 
         # Форматируем ответ
         response = self._format_weather_response(weather_data)
@@ -811,6 +741,11 @@ class FishingForecastBot:
         user_id = update.effective_user.id
         location = analysis.get('location')
         days = analysis.get('days', 1)
+        time_period = analysis.get('time_period')
+        start_offset = self._get_time_period_offset(time_period)
+
+        if not location and user_id in self.user_context:
+            location = self.user_context[user_id].get('last_weather_location') or self.user_context[user_id].get('last_region')
 
         # Если нет локации - уточняем
         if not location:
@@ -821,14 +756,29 @@ class FishingForecastBot:
 
         await update.message.reply_text(f"🎣 Анализирую условия для рыбалки в {location}...")
 
-        # Получаем погоду для анализа
-        weather_data = await self.weather_service.get_weather_forecast(location, days)
+        # Получаем погоду для анализа (используем кэш, если подходит)
+        requested_days = max(days + start_offset, 1)
+        weather_data = self._get_cached_weather(user_id, location, requested_days)
+
+        if not weather_data:
+            weather_data = await self.weather_service.get_weather_forecast(location, requested_days)
 
         if not weather_data:
             await update.message.reply_text(
                 f"❌ Не удалось получить данные для '{location}'. Проверьте название места."
             )
             return
+
+        weather_data = self._slice_weather_forecast(weather_data, start_offset, days)
+
+        if not weather_data or not weather_data.get('forecast'):
+            await update.message.reply_text(
+                f"❌ Не удалось подобрать прогноз по дате для '{location}'."
+            )
+            return
+
+        # Сохраняем контекст погоды
+        self._store_weather_context(user_id, location, weather_data)
 
         # Получаем прогноз клева от ИИ
         forecast = await self.fishing_forecaster.analyze_fishing_conditions(
@@ -837,11 +787,127 @@ class FishingForecastBot:
         )
 
         # Форматируем ответ
-        response = f"🎣 *Прогноз клева для {location}*\n\n{forecast}"
+        response = f"🎣 *Прогноз клева для {weather_data.get('location', location)}*\n\n{forecast}"
         await update.message.reply_text(response)
 
         # Сохраняем в историю
         await self._save_to_history(user_id, original_query, 'fishing_forecast', response)
+
+    def _get_time_period_offset(self, time_period: str) -> int:
+        """Возвращает сдвиг дней для периода времени"""
+        if time_period == 'tomorrow':
+            return 1
+        if time_period == 'day_after_tomorrow':
+            return 2
+        return 0
+
+    def _normalize_location_name(self, name: str) -> str:
+        """Нормализует название локации для сравнения"""
+        if not name:
+            return ''
+        return re.sub(r'[^a-zа-я0-9]+', '', name.lower())
+
+    def _get_cached_weather(self, user_id: int, location: str, min_days: int) -> Dict:
+        """Возвращает кэш погоды, если он подходит под запрос"""
+        context = self.user_context.get(user_id, {})
+        cached_weather = context.get('last_weather_full')
+        cached_location = context.get('last_weather_location')
+        cached_time = context.get('last_weather_timestamp')
+
+        if not cached_weather or not cached_location or not cached_time:
+            return None
+
+        if self._normalize_location_name(cached_location) != self._normalize_location_name(location):
+            return None
+
+        if datetime.now() - cached_time > timedelta(minutes=30):
+            return None
+
+        cached_days = cached_weather.get('days')
+        if cached_days is None:
+            cached_days = len(cached_weather.get('forecast', []))
+
+        if cached_days < min_days:
+            return None
+
+        return cached_weather
+
+    def _slice_weather_forecast(self, weather_data: Dict, start_offset_days: int, days: int) -> Dict:
+        """Обрезает прогноз по дате и количеству дней"""
+        if not weather_data or 'forecast' not in weather_data:
+            return weather_data
+
+        forecasts = weather_data.get('forecast', [])
+        if not forecasts:
+            return weather_data
+
+        try:
+            sorted_forecasts = sorted(
+                forecasts,
+                key=lambda item: datetime.fromisoformat(item['date']).date()
+            )
+        except Exception:
+            sorted_forecasts = forecasts
+
+        try:
+            first_date = datetime.fromisoformat(sorted_forecasts[0]['date']).date()
+            start_date = first_date + timedelta(days=start_offset_days)
+            filtered = [
+                day for day in sorted_forecasts
+                if datetime.fromisoformat(day['date']).date() >= start_date
+            ][:max(days, 1)]
+        except Exception:
+            filtered = sorted_forecasts[:max(days, 1)]
+
+        if not filtered:
+            return weather_data
+
+        sliced = dict(weather_data)
+        sliced['forecast'] = filtered
+        sliced['days'] = len(filtered)
+        return sliced
+
+    def _store_weather_context(self, user_id: int, location: str, weather_data: Dict, full_weather_data: Dict = None):
+        """Сохраняет погодный контекст для последующих запросов"""
+        if user_id not in self.user_context:
+            self.user_context[user_id] = {}
+
+        full_data = full_weather_data or weather_data
+        first_day = weather_data.get('forecast', [{}])[0] if weather_data else {}
+        normalized_location = weather_data.get('location', location)
+
+        self.user_context[user_id].update({
+            'last_weather_full': full_data,
+            'last_weather_location': normalized_location,
+            'last_weather_days': full_data.get('days') if full_data else None,
+            'last_weather_timestamp': datetime.now(),
+            'last_city': normalized_location,
+            'last_region': normalized_location,
+            'last_request_date': datetime.now(),
+            'last_weather': {
+                'location': normalized_location,
+                'temp': first_day.get('temp_min'),
+                'conditions': first_day.get('weather'),
+                'pressure': first_day.get('pressure'),
+                'wind_speed': first_day.get('wind_speed'),
+                'humidity': first_day.get('humidity'),
+                'days': weather_data.get('days', 1),
+                'date': first_day.get('date'),
+                'timestamp': datetime.now()
+            }
+        })
+
+        if hasattr(self, 'last_weather_data'):
+            self.last_weather_data[user_id] = {
+                'location': normalized_location,
+                'temperature': first_day.get('temp_min'),
+                'conditions': first_day.get('weather'),
+                'pressure': first_day.get('pressure'),
+                'wind': first_day.get('wind_speed'),
+                'humidity': first_day.get('humidity'),
+                'forecast_days': weather_data.get('days', 1),
+                'timestamp': datetime.now()
+            }
 
     async def _handle_general_question(self, update: Update, question: str):
         """Обработка общих вопросов о рыбалке"""
