@@ -631,31 +631,31 @@ class FishingForecastBot:
 
         if location and location.lower() in invalid_words:
             # Пытаемся извлечь город из исходного текста другим способом
-            original_text = update.message.text.lower()
-            location = self._extract_city_from_query(original_text)
+            location = self._extract_city_from_query(update.message.text)
 
         if not location or len(location) < 2:  # Минимум 2 буквы для города
             await update.message.reply_text(
                 "❌ Не удалось определить город. Укажите название явно, например: 'Лида' или 'Погода в Лиде'")
             return
 
+        location = self.location_resolver._convert_to_nominative(location)
         await update.message.reply_text(f"🌤️ Ищу '{location}'...")
 
         # Используем улучшенный резолвер с учетом страны пользователя
         resolved = await self.location_resolver.resolve_location_for_user(location, user_id)
-
-        if not resolved:
-            await update.message.reply_text(f"❌ Не удалось найти '{location}'...")
-            return
-
-        # Получаем погоду по координатам
         requested_days = max(days + start_offset, 1)
-        weather_data = await self.weather_service.get_weather_forecast_by_coords(
-            resolved['lat'], resolved['lon'], requested_days
-        )
+
+        if resolved:
+            # Получаем погоду по координатам
+            weather_data = await self.weather_service.get_weather_forecast_by_coords(
+                resolved['lat'], resolved['lon'], requested_days
+            )
+        else:
+            # Fallback: пробуем получить прогноз напрямую по названию
+            weather_data = await self.weather_service.get_weather_forecast(location, requested_days)
 
         if not weather_data:
-            await update.message.reply_text(f"❌ Не удалось получить прогноз...")
+            await update.message.reply_text(f"❌ Не удалось найти '{location}'...")
             return
 
         full_weather_data = weather_data
@@ -684,25 +684,19 @@ class FishingForecastBot:
         }
 
         # Разбиваем текст на слова
-        words = text_lower.split()
+        words = text.split()
 
         # Ищем первое "нормальное" слово (не предлог, не служебное)
         for word in words:
             word_clean = word.strip('.,!?;:')
+            word_clean_lower = word_clean.lower()
 
             # Пропускаем служебные слова
-            if word_clean in NOT_CITIES or len(word_clean) < 2:
+            if word_clean_lower in NOT_CITIES or len(word_clean) < 2:
                 continue
 
             # Это может быть город!
-            # Используем location_resolver для проверки
-            try:
-                resolved = await self.location_resolver.resolve_location_for_user(word_clean, 0)
-                if resolved and 'name' in resolved:
-                    return resolved['name']
-            except:
-                # Если не распозналось, все равно возвращаем как возможный город
-                return word_clean.capitalize()
+            return word_clean
 
         return ""
 

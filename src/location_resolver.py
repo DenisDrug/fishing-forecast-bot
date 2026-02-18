@@ -28,10 +28,7 @@ class LocationResolver:
             # Преобразуем каждое слово, которое может быть существительным
             converted_words = []
             for word in words:
-                if self.morph_analyzer.is_city_name(word):
-                    converted_words.append(self.morph_analyzer.to_nominative(word))
-                else:
-                    converted_words.append(word)
+                converted_words.append(self.morph_analyzer.to_nominative(word))
             return ' '.join(converted_words)
 
     async def resolve_location_for_user(self, location_query: str, user_id: int) -> Optional[Dict]:
