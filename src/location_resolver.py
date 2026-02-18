@@ -1,6 +1,7 @@
 # src/location_resolver.py
 import aiohttp
 import logging
+import re
 from typing import Dict, Optional
 from src.config import config
 from src.geoip import GeoIPService
@@ -70,6 +71,18 @@ class LocationResolver:
 
             # 1. Оригинальный запрос
             search_variants.append(clean_query)
+            # 1.1. Транслитерация (если кириллица)
+            if re.search(r"[А-Яа-яЁё]", clean_query):
+                translit = self._transliterate_to_latin(clean_query)
+                if translit and translit not in search_variants:
+                    search_variants.append(translit)
+                if country_hint == 'BY':
+                    belarusian = self._belarusianize_cyrillic(clean_query)
+                    if belarusian and belarusian not in search_variants:
+                        search_variants.append(belarusian)
+                    bel_translit = self._transliterate_to_latin(belarusian)
+                    if bel_translit and bel_translit not in search_variants:
+                        search_variants.append(bel_translit)
 
             # 2. Без окончания "е" (предположительный предложный падеж)
             if clean_query.lower().endswith('е'):
@@ -139,6 +152,32 @@ class LocationResolver:
         except Exception as e:
             logger.error(f"Ошибка геокодинга: {e}")
             return None
+
+    def _transliterate_to_latin(self, text: str) -> str:
+        """Простая транслитерация кириллицы в латиницу для геокодинга"""
+        mapping = {
+            'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
+            'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
+            'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n',
+            'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
+            'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
+            'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '',
+            'э': 'e', 'ю': 'yu', 'я': 'ya'
+        }
+        result = []
+        for ch in text:
+            lower = ch.lower()
+            if lower in mapping:
+                result.append(mapping[lower])
+            else:
+                result.append(ch)
+        return ''.join(result)
+
+    def _belarusianize_cyrillic(self, text: str) -> str:
+        """Грубая белорусская нормализация для геокодинга"""
+        if not text:
+            return text
+        return text.replace('О', 'А').replace('о', 'а')
 
     def _find_best_match(self, results: list, original_query: str) -> Optional[Dict]:
         """Находит лучшее совпадение среди результатов геокодинга"""
