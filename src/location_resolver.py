@@ -83,6 +83,9 @@ class LocationResolver:
                     bel_translit = self._transliterate_to_latin(belarusian)
                     if bel_translit and bel_translit not in search_variants:
                         search_variants.append(bel_translit)
+                    bel_translit_soft = self._transliterate_to_latin_be(belarusian)
+                    if bel_translit_soft and bel_translit_soft not in search_variants:
+                        search_variants.append(bel_translit_soft)
 
             # 2. Без окончания "е" (предположительный предложный падеж)
             if clean_query.lower().endswith('е'):
@@ -171,6 +174,33 @@ class LocationResolver:
                 result.append(mapping[lower])
             else:
                 result.append(ch)
+        return ''.join(result)
+
+    def _transliterate_to_latin_be(self, text: str) -> str:
+        """Белорусская транслитерация с учетом мягких 'е'/'ё'"""
+        if not text:
+            return text
+
+        result = []
+        consonants = set("bcdfghjklmnpqrstvwxz")
+
+        for i, ch in enumerate(text):
+            lower = ch.lower()
+            if lower == 'е':
+                prev = result[-1][-1] if result else ''
+                if prev in consonants:
+                    result.append('ye')
+                else:
+                    result.append('e')
+            elif lower == 'ё':
+                prev = result[-1][-1] if result else ''
+                if prev in consonants:
+                    result.append('yo')
+                else:
+                    result.append('o')
+            else:
+                result.append(self._transliterate_to_latin(ch))
+
         return ''.join(result)
 
     def _belarusianize_cyrillic(self, text: str) -> str:

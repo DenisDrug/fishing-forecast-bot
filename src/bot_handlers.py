@@ -638,6 +638,7 @@ class FishingForecastBot:
                 "❌ Не удалось определить город. Укажите название явно, например: 'Лида' или 'Погода в Лиде'")
             return
 
+        location = self.location_resolver._clean_location_query(location)
         location = self.location_resolver._convert_to_nominative(location)
         await update.message.reply_text(f"🌤️ Ищу '{location}'...")
 
