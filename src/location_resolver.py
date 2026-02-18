@@ -90,43 +90,54 @@ class LocationResolver:
             if query_lower in popular_with_country and not country_hint:
                 country_hint = popular_with_country[query_lower]
 
-            # Формируем поисковый запрос
-            if country_hint:
-                search_query = f"{clean_query},{country_hint}"
-            else:
-                search_query = clean_query
-
-            params = {
-                'q': search_query,
-                'limit': 10,  # Больше результатов для лучшего поиска
-                'appid': config.OPENWEATHER_API_KEY,
-                'lang': 'ru'
-            }
-
             async with aiohttp.ClientSession() as session:
-                async with session.get(self.geocoding_url, params=params) as response:
-                    if response.status == 200:
+                for variant in search_variants:
+                    if country_hint:
+                        search_query = f"{variant},{country_hint}"
+                    else:
+                        search_query = variant
+
+                    params = {
+                        'q': search_query,
+                        'limit': 10,  # Больше результатов для лучшего поиска
+                        'appid': config.OPENWEATHER_API_KEY,
+                        'lang': 'ru'
+                    }
+
+                    async with session.get(self.geocoding_url, params=params) as response:
+                        if response.status != 200:
+                            continue
+
                         data = await response.json()
-
                         if not data:
-                            return None
+                            continue
 
-                        # Ищем лучшее совпадение
                         best_match = self._find_best_match(data, clean_query)
                         if best_match:
                             return best_match
 
-                        # Если не нашли, пробуем без страны
-                        if country_hint:
-                            params['q'] = clean_query
-                            async with session.get(self.geocoding_url, params=params) as response2:
-                                if response2.status == 200:
-                                    data2 = await response2.json()
-                                    return self._find_best_match(data2, clean_query) if data2 else None
+                # Если не нашли с подсказкой страны, пробуем без нее
+                if country_hint:
+                    for variant in search_variants:
+                        params = {
+                            'q': variant,
+                            'limit': 10,
+                            'appid': config.OPENWEATHER_API_KEY,
+                            'lang': 'ru'
+                        }
+                        async with session.get(self.geocoding_url, params=params) as response2:
+                            if response2.status != 200:
+                                continue
 
-                        return None
-                    else:
-                        return None
+                            data2 = await response2.json()
+                            if not data2:
+                                continue
+
+                            best_match = self._find_best_match(data2, clean_query)
+                            if best_match:
+                                return best_match
+
+                return None
 
         except Exception as e:
             logger.error(f"Ошибка геокодинга: {e}")
@@ -180,8 +191,15 @@ class LocationResolver:
 
         result = ' '.join(words)
 
-        # Возвращаем как есть - геокодинг сам разберется
-        return result
+        # Нормализуем падеж, чтобы геокодинг находил города в начальной форме
+        normalized_words = []
+        for word in result.split():
+            if self.morph_analyzer.is_city_name(word):
+                normalized_words.append(self.morph_analyzer.to_nominative(word))
+            else:
+                normalized_words.append(word)
+
+        return ' '.join(normalized_words)
 
     def _select_best_match(self, results: list, original_query: str) -> Dict:
         """Выбирает лучший результат из найденных"""
