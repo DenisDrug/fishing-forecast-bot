@@ -749,7 +749,7 @@ class FishingForecastBot:
             )
             return
 
-        await update.message.reply_text(f"🎣 Анализирую условия для рыбалки в {location}...")
+        thinking_msg = await update.message.reply_text(f"🎣 Анализирую условия для рыбалки в {location}...")
 
         # Получаем погоду для анализа (используем кэш, если подходит)
         requested_days = max(days + start_offset, 1)
@@ -784,6 +784,11 @@ class FishingForecastBot:
         # Форматируем ответ
         response = f"🎣 *Прогноз клева для {weather_data.get('location', location)}*\n\n{forecast}"
         await update.message.reply_text(response)
+        try:
+            await thinking_msg.delete()
+        except Exception as exc:
+            logging.debug("Failed to delete forecast analysis message: %s", exc)
+
 
         # Сохраняем в историю
         await self._save_to_history(user_id, original_query, 'fishing_forecast', response)

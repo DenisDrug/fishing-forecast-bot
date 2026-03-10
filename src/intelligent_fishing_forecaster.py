@@ -45,7 +45,11 @@ class IntelligentFishingForecaster:
                 async with session.post(self.groq_url, headers=headers, json=payload) as response:
                     if response.status == 200:
                         data = await response.json()
-                        return data["choices"][0]["message"]["content"].strip()
+                        content = data["choices"][0]["message"]["content"].strip()
+                        if not content:
+                            logger.warning("Groq API returned empty content, falling back to backup forecast")
+                            return self._backup_fishing_forecast(weather_data)
+                        return content
                     else:
                         logger.error(f"Groq API error: {response.status}")
                         return self._backup_fishing_forecast(weather_data)
