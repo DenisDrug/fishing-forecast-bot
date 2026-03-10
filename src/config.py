@@ -32,6 +32,7 @@ class Config:
     FORECAST_DAYS = int(os.getenv('FORECAST_DAYS', 5))
     WEATHER_UNITS = os.getenv('WEATHER_UNITS', 'metric')
     LANGUAGE = os.getenv('LANGUAGE', 'ru')
+    FISHING_FORECAST_MAX_TOKENS = int(os.getenv('FISHING_FORECAST_MAX_TOKENS', 1500))
 
     # Проверка обязательных переменных
     @classmethod
