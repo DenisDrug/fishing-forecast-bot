@@ -41,3 +41,12 @@ class MorphAnalyzer:
             return False
         except Exception:
             return False
+
+    def is_geographical_name(self, word: str) -> bool:
+        """Проверяет, является ли слово географическим названием (Geox)"""
+        try:
+            parsed = self.morph.parse(word)[0]
+            tags = parsed.tag
+            return 'Geox' in str(tags)
+        except Exception:
+            return False
