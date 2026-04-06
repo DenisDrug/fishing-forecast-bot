@@ -72,11 +72,19 @@ class LocationResolver:
 
             # 1. Оригинальный запрос
             search_variants.append(clean_query)
+            # 1.0. Варианты падежей
+            search_variants.extend(self._add_case_variants(clean_query))
             # 1.1. Транслитерация (если кириллица)
             if re.search(r"[А-Яа-яЁё]", clean_query):
                 translit = self._transliterate_to_latin(clean_query)
                 if translit and translit not in search_variants:
                     search_variants.append(translit)
+                # Транслит для падежных вариантов
+                for variant in list(search_variants):
+                    if re.search(r"[А-Яа-яЁё]", variant):
+                        v_translit = self._transliterate_to_latin(variant)
+                        if v_translit and v_translit not in search_variants:
+                            search_variants.append(v_translit)
                 if country_hint == 'BY':
                     belarusian = self._belarusianize_cyrillic(clean_query)
                     if belarusian and belarusian not in search_variants:
@@ -87,6 +95,9 @@ class LocationResolver:
                     bel_translit_soft = self._transliterate_to_latin_be(belarusian)
                     if bel_translit_soft and bel_translit_soft not in search_variants:
                         search_variants.append(bel_translit_soft)
+                    for extra in self._add_be_translit_variants(bel_translit_soft):
+                        if extra and extra not in search_variants:
+                            search_variants.append(extra)
 
             # 2. Без окончания "е" (предположительный предложный падеж)
             if clean_query.lower().endswith('е'):
@@ -175,7 +186,7 @@ class LocationResolver:
             'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
             'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
             'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '',
-            'э': 'e', 'ю': 'yu', 'я': 'ya'
+            'э': 'e', 'ю': 'yu', 'я': 'ya', 'ў': 'w'
         }
         result = []
         for ch in text:
@@ -197,13 +208,21 @@ class LocationResolver:
         for i, ch in enumerate(text):
             lower = ch.lower()
             if lower == 'е':
-                prev = result[-1][-1] if result else ''
+                prev = ''
+                if result:
+                    last = result[-1]
+                    if last:
+                        prev = last[-1]
                 if prev in consonants:
                     result.append('ye')
                 else:
                     result.append('e')
             elif lower == 'ё':
-                prev = result[-1][-1] if result else ''
+                prev = ''
+                if result:
+                    last = result[-1]
+                    if last:
+                        prev = last[-1]
                 if prev in consonants:
                     result.append('yo')
                 else:
@@ -218,6 +237,53 @@ class LocationResolver:
         if not text:
             return text
         return text.replace('О', 'А').replace('о', 'а')
+
+    def _add_case_variants(self, query: str) -> list:
+        """Добавляет варианты формы слова для геокодинга"""
+        variants = []
+        q = query.strip()
+        q_lower = q.lower()
+
+        if len(q) < 3:
+            return variants
+
+        # "Островце" -> "Островца"/"Островци"
+        if q_lower.endswith('е'):
+            variants.append(q[:-1] + 'а')
+            variants.append(q[:-1] + 'и')
+
+        # "Островца" -> "Островец"
+        if q_lower.endswith('ца'):
+            variants.append(q[:-2] + 'ец')
+
+        # "Ивья"/"Ивье" варианты
+        if q_lower.endswith('я'):
+            variants.append(q[:-1])
+            variants.append(q[:-1] + 'ь')
+
+        # Обобщенный вариант: убрать финальную "а"
+        if q_lower.endswith('а'):
+            variants.append(q[:-1])
+
+        unique = []
+        seen = set()
+        for v in variants:
+            if v and v not in seen:
+                seen.add(v)
+                unique.append(v)
+        return unique
+
+    def _add_be_translit_variants(self, translit: str) -> list:
+        """Дополнительные белорусские варианты латиницы (для Iwye и подобных)"""
+        variants = []
+        if not translit:
+            return variants
+        t = translit.lower()
+        if t.startswith('iv'):
+            variants.append('iw' + t[2:])
+        if 'vye' in t:
+            variants.append(t.replace('vye', 'wye', 1))
+        return variants
 
     def _find_best_match(
             self,
