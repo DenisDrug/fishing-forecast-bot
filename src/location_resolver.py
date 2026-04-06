@@ -2,6 +2,7 @@
 import aiohttp
 import logging
 import re
+from difflib import SequenceMatcher
 from typing import Dict, Optional
 from src.config import config
 from src.geoip import GeoIPService
@@ -125,7 +126,12 @@ class LocationResolver:
                         if not data:
                             continue
 
-                        best_match = self._find_best_match(data, clean_query)
+                        best_match = self._find_best_match(
+                            data,
+                            clean_query,
+                            variant,
+                            country_hint=country_hint
+                        )
                         if best_match:
                             return best_match
 
@@ -146,7 +152,11 @@ class LocationResolver:
                             if not data2:
                                 continue
 
-                            best_match = self._find_best_match(data2, clean_query)
+                            best_match = self._find_best_match(
+                                data2,
+                                clean_query,
+                                variant
+                            )
                             if best_match:
                                 return best_match
 
@@ -209,29 +219,62 @@ class LocationResolver:
             return text
         return text.replace('О', 'А').replace('о', 'а')
 
-    def _find_best_match(self, results: list, original_query: str) -> Optional[Dict]:
+    def _find_best_match(
+            self,
+            results: list,
+            *query_candidates: str,
+            country_hint: Optional[str] = None
+    ) -> Optional[Dict]:
         """Находит лучшее совпадение среди результатов геокодинга"""
-        original_lower = original_query.lower()
+        normalized_queries = []
+        for query in query_candidates:
+            if query:
+                normalized_queries.append(query.lower().replace('ё', 'е'))
+
+        if not normalized_queries:
+            return None
+
+        best_score = 0
+        best_result = None
+
+        def score_pair(query: str, name: str) -> int:
+            if not name:
+                return 0
+            if query == name:
+                return 100
+            if query in name or name in query:
+                return 90
+            ratio = SequenceMatcher(None, query, name).ratio()
+            if ratio >= 0.85:
+                return 80
+            if ratio >= 0.75:
+                return 60
+            if ratio >= 0.65:
+                return 40
+            return 0
 
         for result in results:
+            if country_hint and result.get('country') != country_hint:
+                continue
+
             local_names = result.get('local_names', {})
 
-            # Проверяем русское название
-            ru_name = local_names.get('ru', '').lower()
+            ru_name = local_names.get('ru', '').lower().replace('ё', 'е')
+            be_name = local_names.get('be', '').lower().replace('ё', 'е')
+            en_name = result.get('name', '').lower().replace('ё', 'е')
 
-            # Проверяем английское название
-            en_name = result.get('name', '').lower()
+            for query in normalized_queries:
+                score = max(
+                    score_pair(query, ru_name),
+                    score_pair(query, be_name),
+                    score_pair(query, en_name)
+                )
+                if score > best_score:
+                    best_score = score
+                    best_result = result
 
-            # Проверяем похожесть
-            if (original_lower in ru_name or
-                    original_lower in en_name or
-                    ru_name in original_lower or
-                    en_name in original_lower):
-                return self._format_location_result(result)
-
-        # Если не нашли точного совпадения, берем первый результат
-        if results:
-            return self._format_location_result(results[0])
+        if best_result and best_score >= 60:
+            return self._format_location_result(best_result)
 
         return None
 
