@@ -113,12 +113,21 @@ class MorphAnalyzer:
             if not best_form:
                 best_form = word
 
+            # Если слово оканчивается на "-це", проверяем вариант на "-ец"
+            if word.lower().endswith('це'):
+                variant_ec = word[:-2] + 'ец'
+                if self._is_known_noun_or_geox(variant_ec):
+                    best_form = variant_ec
+
             # Если гео-разбора нет, пробуем мягкий знак для форм на "-е"
+            # только если нормализация дала "плохую" базовую форму.
             if all('Geox' not in str(p.tag) for p in parses):
                 if word.lower().endswith('е'):
-                    soft_variant = word[:-1] + 'ь'
-                    if self._is_known_noun_or_geox(soft_variant):
-                        best_form = soft_variant
+                    bad_base = (best_form.lower() == word.lower() or best_form.lower().endswith('о'))
+                    if bad_base:
+                        soft_variant = word[:-1] + 'ь'
+                        if self._is_known_noun_or_geox(soft_variant):
+                            best_form = soft_variant
 
             if word and word[0].isupper():
                 return best_form.capitalize()
