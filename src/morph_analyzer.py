@@ -50,3 +50,24 @@ class MorphAnalyzer:
             return 'Geox' in str(tags)
         except Exception:
             return False
+
+    def to_nominative_geo(self, word: str) -> str:
+        """Безопасно нормализует топоним, избегая глагольных форм"""
+        try:
+            parsed = self.morph.parse(word)[0]
+            tags = str(parsed.tag)
+            normal_form = parsed.normal_form
+
+            if 'VERB' in tags or 'INFN' in tags:
+                return word
+
+            if 'NOUN' in tags or 'Geox' in tags:
+                if abs(len(normal_form) - len(word)) > 2:
+                    return word
+                if word and word[0].isupper():
+                    return normal_form.capitalize()
+                return normal_form
+
+            return word
+        except Exception:
+            return word

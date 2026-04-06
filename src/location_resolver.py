@@ -24,18 +24,13 @@ class LocationResolver:
 
         if len(words) == 1:
             # Одно слово - преобразуем
-            if self.morph_analyzer.is_geographical_name(city_name):
-                return self.morph_analyzer.to_nominative(city_name)
-            return city_name
+            return self.morph_analyzer.to_nominative_geo(city_name)
         else:
             # Составное название (например, "Новый Уренгой")
             # Преобразуем каждое слово, которое может быть существительным
             converted_words = []
             for word in words:
-                if self.morph_analyzer.is_geographical_name(word):
-                    converted_words.append(self.morph_analyzer.to_nominative(word))
-                else:
-                    converted_words.append(word)
+                converted_words.append(self.morph_analyzer.to_nominative_geo(word))
             return ' '.join(converted_words)
 
     async def resolve_location_for_user(self, location_query: str, user_id: int) -> Optional[Dict]:
@@ -374,10 +369,7 @@ class LocationResolver:
         # Нормализуем падеж, чтобы геокодинг находил города в начальной форме
         normalized_words = []
         for word in result.split():
-            if self.morph_analyzer.is_geographical_name(word):
-                normalized_words.append(self.morph_analyzer.to_nominative(word))
-            else:
-                normalized_words.append(word)
+            normalized_words.append(self.morph_analyzer.to_nominative_geo(word))
 
         return ' '.join(normalized_words)
 
