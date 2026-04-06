@@ -111,10 +111,28 @@ class MorphAnalyzer:
                     best_form = candidate
 
             if not best_form:
-                return word
+                best_form = word
+
+            # Если гео-разбора нет, пробуем мягкий знак для форм на "-е"
+            if all('Geox' not in str(p.tag) for p in parses):
+                if word.lower().endswith('е'):
+                    soft_variant = word[:-1] + 'ь'
+                    if self._is_known_noun_or_geox(soft_variant):
+                        best_form = soft_variant
 
             if word and word[0].isupper():
                 return best_form.capitalize()
             return best_form
         except Exception:
             return word
+
+    def _is_known_noun_or_geox(self, word: str) -> bool:
+        """Проверяет, есть ли слово как существительное/гео в словаре"""
+        try:
+            for p in self.morph.parse(word):
+                tags = str(p.tag)
+                if ('NOUN' in tags or 'Geox' in tags) and p.normal_form == word.lower():
+                    return True
+            return False
+        except Exception:
+            return False

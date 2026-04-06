@@ -92,6 +92,12 @@ class LocationResolver:
                     bel_translit = self._transliterate_to_latin(belarusian)
                     if bel_translit and bel_translit not in search_variants:
                         search_variants.append(bel_translit)
+                    bel_lat = self._transliterate_to_latin_by(clean_query)
+                    if bel_lat and bel_lat not in search_variants:
+                        search_variants.append(bel_lat)
+                    bel_lat2 = self._transliterate_to_latin_by(belarusian)
+                    if bel_lat2 and bel_lat2 not in search_variants:
+                        search_variants.append(bel_lat2)
                     bel_translit_soft = self._transliterate_to_latin_be(belarusian)
                     if bel_translit_soft and bel_translit_soft not in search_variants:
                         search_variants.append(bel_translit_soft)
@@ -230,6 +236,26 @@ class LocationResolver:
             else:
                 result.append(self._transliterate_to_latin(ch))
 
+        return ''.join(result)
+
+    def _transliterate_to_latin_by(self, text: str) -> str:
+        """Белорусская латиница (ASCII) для геокодинга"""
+        mapping = {
+            'а': 'a', 'б': 'b', 'в': 'v', 'г': 'h', 'д': 'd',
+            'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
+            'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n',
+            'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
+            'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
+            'ш': 'sh', 'щ': 'shch', 'ъ': '', 'ы': 'y', 'ь': '',
+            'э': 'e', 'ю': 'yu', 'я': 'ya', 'ў': 'w', 'і': 'i'
+        }
+        result = []
+        for ch in text:
+            lower = ch.lower()
+            if lower in mapping:
+                result.append(mapping[lower])
+            else:
+                result.append(ch)
         return ''.join(result)
 
     def _belarusianize_cyrillic(self, text: str) -> str:
