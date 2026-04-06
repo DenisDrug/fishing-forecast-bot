@@ -276,7 +276,7 @@ class IntentAnalyzer:
             if word and word[0].isupper():
                 # Нормализуем падеж если есть морфология
                 if use_morph:
-                    return morph.to_nominative_geo(word)
+                    return word
                 return word
 
         # Ищем паттерн "в [город]"
@@ -286,7 +286,7 @@ class IntentAnalyzer:
             if location.lower() not in remove_words:
                 # Нормализуем падеж если есть морфология
                 if use_morph:
-                    return morph.to_nominative_geo(location)
+                    return location
                 return location
 
         # Ищем просто слово с заглавной
@@ -298,7 +298,7 @@ class IntentAnalyzer:
 
                 # Нормализуем падеж если есть морфология
                 if use_morph:
-                    return morph.to_nominative_geo(word)
+                    return word
                 return word
 
         return None
