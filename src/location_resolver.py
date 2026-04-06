@@ -24,13 +24,13 @@ class LocationResolver:
 
         if len(words) == 1:
             # Одно слово - преобразуем
-            return self.morph_analyzer.to_nominative_geo(city_name)
+            return self.morph_analyzer.normalize_toponym(city_name)
         else:
             # Составное название (например, "Новый Уренгой")
             # Преобразуем каждое слово, которое может быть существительным
             converted_words = []
             for word in words:
-                converted_words.append(self.morph_analyzer.to_nominative_geo(word))
+                converted_words.append(self.morph_analyzer.normalize_toponym(word))
             return ' '.join(converted_words)
 
     async def resolve_location_for_user(self, location_query: str, user_id: int) -> Optional[Dict]:
@@ -300,6 +300,20 @@ class LocationResolver:
         if not normalized_queries:
             return None
 
+        # 1. Приоритет точного совпадения по названию
+        for result in results:
+            if country_hint and result.get('country') != country_hint:
+                continue
+
+            local_names = result.get('local_names', {})
+            ru_name = local_names.get('ru', '').lower().replace('ё', 'е')
+            be_name = local_names.get('be', '').lower().replace('ё', 'е')
+            en_name = result.get('name', '').lower().replace('ё', 'е')
+
+            for query in normalized_queries:
+                if query and (query == ru_name or query == be_name or query == en_name):
+                    return self._format_location_result(result)
+
         best_score = 0
         best_result = None
 
@@ -369,7 +383,7 @@ class LocationResolver:
         # Нормализуем падеж, чтобы геокодинг находил города в начальной форме
         normalized_words = []
         for word in result.split():
-            normalized_words.append(self.morph_analyzer.to_nominative_geo(word))
+            normalized_words.append(self.morph_analyzer.normalize_toponym(word))
 
         return ' '.join(normalized_words)
 

@@ -75,3 +75,46 @@ class MorphAnalyzer:
             return normal_form
         except Exception:
             return word
+
+    def normalize_toponym(self, word: str) -> str:
+        """Нормализует топоним через парадигму (nomn), без костылей"""
+        try:
+            parses = self.morph.parse(word)
+            if not parses:
+                return word
+
+            best_form = None
+            best_score = -1
+
+            for p in parses:
+                tags = str(p.tag)
+                if 'VERB' in tags or 'INFN' in tags:
+                    continue
+                if 'NOUN' not in tags and 'Geox' not in tags:
+                    continue
+
+                inflected = p.inflect({'nomn'})
+                if not inflected:
+                    continue
+                candidate = inflected.word
+
+                score = 0
+                if 'Geox' in tags:
+                    score += 5
+                if abs(len(candidate) - len(word)) <= 2:
+                    score += 2
+                if candidate and word and candidate[0] == word[0].lower():
+                    score += 1
+
+                if score > best_score:
+                    best_score = score
+                    best_form = candidate
+
+            if not best_form:
+                return word
+
+            if word and word[0].isupper():
+                return best_form.capitalize()
+            return best_form
+        except Exception:
+            return word
